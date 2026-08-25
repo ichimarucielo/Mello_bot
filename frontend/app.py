@@ -1,100 +1,148 @@
+import logging
 import sys
-from pathlib import Path
 from datetime import datetime
-
-ROOT = Path(__file__).resolve().parent.parent
-
-sys.path.append(str(ROOT))
+from pathlib import Path
+from typing import Any
 
 import streamlit as st
 
-from core.execution_logger import (
-    ExecutionLogger
-)
+# =============================================================================
+# PATHS
+# =============================================================================
 
-from core.history_service import (
-    HistoryService
-)
+ROOT = Path(__file__).resolve().parent.parent
 
-from core.registry import load_projects
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+OUTPUT_FOLDER = ROOT / "data" / "output"
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
+from core.execution_logger import ExecutionLogger
 from core.executor import Executor
 from core.file_manager import FileManager
-from core.validator import Validator
+from core.history_service import HistoryService
 from core.output_validator import OutputValidator
-from core.identifier import (
-    Identifier
+from core.registry import load_projects
+from core.validator import Validator
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 
-def validate_uploaded_files(
-    project_id: str,
-    project: dict,
-    uploaded_files: dict
-) -> tuple[list, bool]:
+logger = logging.getLogger(__name__)
 
-    validation_results = []
-
-    all_valid = True
-
-    for file_definition in project["required_files"]:
-
-        file_id = file_definition["id"]
-
-        uploaded_file = uploaded_files.get(
-            file_id
-        )
-
-        if uploaded_file is None:
-
-            all_valid = False
-
-            continue
-
-        saved_file = (
-            FileManager.save_uploaded_file(
-                project_id=project_id,
-                file_id=file_id,
-                uploaded_file=uploaded_file
-            )
-        )
-
-        result = Validator.validate_file(
-            file_path=saved_file,
-            file_definition=file_definition
-        )
-
-        validation_results.append(
-            result
-        )
-
-        if not result["valid"]:
-
-            all_valid = False
-
-    return (
-        validation_results,
-        all_valid
-    )
-
+# =============================================================================
+# PAGE CONFIG
+# =============================================================================
 
 st.set_page_config(
     page_title="MELLO BOT",
     page_icon="🤖",
-    layout="wide"
+    layout="wide",
 )
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+
+def validate_uploaded_files(
+    project_id: str,
+    project: dict[str, Any],
+    uploaded_files: dict[str, Any],
+) -> tuple[list[dict[str, Any]], bool]:
+
+    validation_results = []
+    all_valid = True
+
+    for file_definition in project.get("required_files", []):
+
+        file_id = file_definition["id"]
+
+        uploaded_file = uploaded_files.get(file_id)
+
+        if uploaded_file is None:
+            all_valid = False
+            continue
+
+        try:
+
+            saved_file = FileManager.save_uploaded_file(
+                project_id=project_id,
+                file_id=file_id,
+                uploaded_file=uploaded_file,
+            )
+
+            result = Validator.validate_file(
+                file_path=saved_file,
+                file_definition=file_definition,
+            )
+
+            validation_results.append(result)
+
+            if not result.get("valid", False):
+                all_valid = False
+
+        except Exception:
+
+            logger.exception(
+                "Erro validando arquivo %s",
+                file_id,
+            )
+
+            validation_results.append(
+                {
+                    "file_id": file_id,
+                    "display_name": file_definition.get(
+                        "display_name",
+                        file_id,
+                    ),
+                    "valid": False,
+                    "score": 0,
+                    "missing_columns": [],
+                    "error": "Erro ao processar arquivo",
+                }
+            )
+
+            all_valid = False
+
+    return validation_results, all_valid
+
+
+# =============================================================================
+# FILE MANAGER INIT
+# =============================================================================
 
 FileManager.ensure_folders()
 
-st.title("🤖 MELLO BOT")
+# =============================================================================
+# SIDEBAR
+# =============================================================================
 
 with st.sidebar:
 
-    st.header(
-        "📋 Histórico"
-    )
+    st.header("📋 Histórico")
 
-    history = (
-        HistoryService.get_history()
-    )
+    try:
+
+        history = HistoryService.get_history()
+
+    except Exception:
+
+        logger.exception(
+            "Erro carregando histórico"
+        )
+
+        history = []
 
     if not history:
 
@@ -104,53 +152,51 @@ with st.sidebar:
 
     else:
 
-        for execution in history:
+        for execution in history[-30:]:
 
-            status = (
+            status_icon = (
                 "✅"
-                if execution["status"] == "success"
+                if execution.get("status")
+                == "success"
                 else "❌"
-            )
-
-            duration = execution.get(
-                "duration_seconds",
-                "-"
             )
 
             st.markdown(
                 f"""
-{status} **{execution['project_id']}**
+{status_icon} **{execution.get('project_id', '-') }**
 
-Tempo: {duration}s
+Tempo: {execution.get('duration_seconds', '-') }s
 
-Execução:
-{execution['execution_id']}
+Execução: `{execution.get('execution_id', '-')}`
 """
             )
 
             st.divider()
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+st.title("🤖 MELLO BOT")
 
 projects = load_projects()
 
 selected_project_id = st.selectbox(
     "Selecione um ETL",
     options=list(projects.keys()),
-    format_func=lambda x: projects[x]["name"]
+    format_func=lambda x: projects[x]["name"],
 )
 
-project = projects[
-    selected_project_id
-]
+project = projects[selected_project_id]
 
-st.subheader(
-    project["name"]
-)
-
-st.write(
-    project["description"]
-)
+st.subheader(project["name"])
+st.write(project["description"])
 
 st.divider()
+
+# =============================================================================
+# UPLOADS
+# =============================================================================
 
 st.subheader(
     "Arquivos obrigatórios"
@@ -158,23 +204,22 @@ st.subheader(
 
 uploaded_files = {}
 
-for file_definition in project[
-    "required_files"
-]:
+for file_definition in project.get(
+    "required_files",
+    [],
+):
 
-    uploaded_file = st.file_uploader(
+    uploaded_files[
+        file_definition["id"]
+    ] = st.file_uploader(
         label=file_definition[
             "display_name"
         ],
         type=file_definition[
             "accepted_extensions"
         ],
-        key=file_definition["id"]
+        key=file_definition["id"],
     )
-
-    uploaded_files[
-        file_definition["id"]
-    ] = uploaded_file
 
 st.divider()
 
@@ -183,8 +228,11 @@ all_files_uploaded = all(
 )
 
 validation_results = []
-
 all_files_valid = False
+
+# =============================================================================
+# VALIDATION
+# =============================================================================
 
 if not all_files_uploaded:
 
@@ -196,40 +244,54 @@ else:
 
     (
         validation_results,
-        all_files_valid
+        all_files_valid,
     ) = validate_uploaded_files(
         project_id=selected_project_id,
         project=project,
-        uploaded_files=uploaded_files
+        uploaded_files=uploaded_files,
     )
 
-    st.subheader(
-        "Validação"
-    )
+    st.subheader("Validação")
 
     for result in validation_results:
 
-        if result["valid"]:
+        display_name = result.get(
+            "display_name",
+            "Arquivo",
+        )
+
+        score = result.get(
+            "score",
+            0,
+        )
+
+        if result.get(
+            "valid",
+            False,
+        ):
 
             st.success(
-                f"{result['display_name']} - Score: {result['score']}%"
+                f"{display_name} - Score: {score}%"
             )
 
         else:
 
             st.error(
-                f"{result['display_name']} - Score: {result['score']}%"
+                f"{display_name} - Score: {score}%"
             )
 
-            if result["missing_columns"]:
+            missing_columns = result.get(
+                "missing_columns",
+                [],
+            )
+
+            if missing_columns:
 
                 st.write(
                     "Colunas ausentes:"
                 )
 
-                for column in result[
-                    "missing_columns"
-                ]:
+                for column in missing_columns:
 
                     st.write(
                         f"• {column}"
@@ -247,16 +309,19 @@ else:
             "Existem erros de validação."
         )
 
+# =============================================================================
+# EXECUÇÃO
+# =============================================================================
+
 st.divider()
 
 if st.button(
     "Executar ETL",
-    disabled=not all_files_valid
+    disabled=not all_files_valid,
 ):
 
     execution_id = (
-        ExecutionLogger
-        .create_execution_id()
+        ExecutionLogger.create_execution_id()
     )
 
     start_time = datetime.now()
@@ -273,12 +338,11 @@ if st.button(
 
         output_result = (
             OutputValidator.validate(
-                output_folder=Path(
-                    r"C:\dev\Ia_quarteto\data\output"
+                output_folder=OUTPUT_FOLDER,
+                expected_outputs=project.get(
+                    "outputs",
+                    [],
                 ),
-                expected_outputs=project[
-                    "outputs"
-                ]
             )
         )
 
@@ -286,35 +350,48 @@ if st.button(
             "output_result"
         ] = output_result
 
+        st.session_state[
+            "output_project_id"
+        ] = selected_project_id
+
         end_time = datetime.now()
+
+        found = output_result.get(
+            "found",
+            [],
+        )
+
+        missing = output_result.get(
+            "missing",
+            [],
+        )
+
+        status = (
+            "success"
+            if not missing
+            else "partial_success"
+        )
 
         ExecutionLogger.save(
             {
                 "execution_id": execution_id,
                 "project_id": selected_project_id,
-                "project_name": project[
-                    "name"
-                ],
-                "status": "success",
-                "start_time": (
-                    start_time.isoformat()
-                ),
-                "end_time": (
-                    end_time.isoformat()
-                ),
+                "project_name": project["name"],
+                "status": status,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
                 "duration_seconds": round(
                     (
                         end_time
                         - start_time
                     ).total_seconds(),
-                    2
+                    2,
                 ),
                 "outputs": [
-                    file_info["name"]
-                    for file_info in output_result[
-                        "found"
-                    ]
-                ]
+                    x["name"]
+                    for x in found
+                ],
+                "missing_outputs": missing,
             }
         )
 
@@ -324,75 +401,114 @@ if st.button(
 
     except Exception as error:
 
+        logger.exception(
+            "Erro executando ETL"
+        )
+
         ExecutionLogger.save(
             {
                 "execution_id": execution_id,
                 "project_id": selected_project_id,
-                "project_name": project[
-                    "name"
-                ],
+                "project_name": project["name"],
                 "status": "error",
-                "error": str(error)
+                "error": str(error),
             }
         )
 
         st.error(
-            str(error)
+            f"Erro ao executar ETL: {error}"
         )
 
-if "output_result" in st.session_state:
+# =============================================================================
+# OUTPUTS
+# =============================================================================
 
-    output_result = (
-        st.session_state[
-            "output_result"
-        ]
-    )
+if (
+    "output_result"
+    in st.session_state
+):
 
-    st.divider()
+    if (
+        st.session_state.get(
+            "output_project_id"
+        )
+        == selected_project_id
+    ):
 
-    st.subheader(
-        "Arquivos Gerados"
-    )
-
-    for file_info in output_result[
-        "found"
-    ]:
-
-        st.success(
-            file_info["name"]
+        output_result = (
+            st.session_state[
+                "output_result"
+            ]
         )
 
-        with open(
-            file_info["path"],
-            "rb"
-        ) as file:
+        st.divider()
+
+        st.subheader(
+            "Arquivos Gerados"
+        )
+
+        for file_info in output_result.get(
+            "found",
+            [],
+        ):
+
+            file_path = Path(
+                file_info["path"]
+            )
+
+            if not file_path.exists():
+
+                st.error(
+                    f"Arquivo não encontrado: {file_info['name']}"
+                )
+
+                continue
+
+            st.success(
+                file_info["name"]
+            )
+
+            try:
+
+                file_data = (
+                    file_path.read_bytes()
+                )
+
+            except OSError:
+
+                logger.exception(
+                    "Erro lendo arquivo %s",
+                    file_path,
+                )
+
+                st.error(
+                    f"Erro ao ler {file_info['name']}"
+                )
+
+                continue
 
             st.download_button(
-                label=(
-                    f"📥 Baixar "
-                    f"{file_info['name']}"
-                ),
-                data=file.read(),
+                label=f"📥 Baixar {file_info['name']}",
+                data=file_data,
                 file_name=file_info[
                     "name"
                 ],
-                mime=(
-                    "application/"
-                    "vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                ),
-                key=f"download_{file_info['name']}"
+                key=f"download_{file_info['name']}",
             )
 
-    if output_result["missing"]:
-
-        st.error(
-            "Arquivos não encontrados:"
+        missing = output_result.get(
+            "missing",
+            [],
         )
 
-        for missing_file in output_result[
-            "missing"
-        ]:
+        if missing:
 
-            st.write(
-                f"• {missing_file}"
+            st.error(
+                "Arquivos não encontrados:"
             )
+
+            for file_name in missing:
+
+                st.write(
+                    f"• {file_name}"
+                )
