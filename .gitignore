@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Env
+.venv/
+
+# Streamlit
+.streamlit/
+
+# Logs
+logs/
+
+# Uploads
+inputs/
+
+# Outputs
+outputs/
+
+# VS Code
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini

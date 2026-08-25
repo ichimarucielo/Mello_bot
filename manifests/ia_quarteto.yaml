@@ -1,0 +1,49 @@
+id: ia_quarteto
+
+name: Faturamento - Check e Report
+
+category: faturamento
+
+description: >
+  Conciliação SAP x Prefeitura e geração
+  de workbook de faturamento.
+
+project_path: C:/dev/IA_QUARTETO
+
+entrypoint:
+  script: main.py
+
+required_files:
+
+  - id: prefeitura
+    display_name: Prefeitura
+    accepted_extensions:
+      - csv
+    required_columns:
+      - Numero NF
+      - Numerp RPS
+      - CNPJ
+      - Valor Serviço
+
+  - id: fs10n
+    display_name: FS10N
+    accepted_extensions:
+      - xlsx
+    required_columns:
+      - Nº documento
+      - Conta
+      - Montante em moeda interna
+
+  - id: zsd008
+    display_name: ZSD008
+    accepted_extensions:
+      - xlsx
+    required_columns:
+      - Nº Nota Fiscal
+      - N° RPS
+      - Fatura Billing
+      - Valor Bruto
+
+outputs:
+  - Check_Faturamento.xlsx
+  - Report_Faturamento.xlsx
