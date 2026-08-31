@@ -7,12 +7,26 @@ from fastapi import UploadFile
 from core.upload_mapper import UploadMapper
 from core.output_validator import OutputValidator
 from typing import Annotated
+from fastapi.responses import FileResponse
+from core.history_service import HistoryService
 
 app = FastAPI(
     title="MELLO BOT API",
     version="1.0.0",
 )
 
+
+def get_project_output_folder(
+    project: dict,
+) -> Path:
+
+    return (
+        Path(
+            project["project_path"]
+        )
+        / "data"
+        / "output"
+    )
 
 @app.get("/health")
 def health():
@@ -64,6 +78,134 @@ def get_project(
 
     return project
 
+@app.get(
+    "/projects/{project_id}/outputs/{file_name}"
+)
+def download_output(
+    project_id: str,
+    file_name: str,
+):
+
+    projects = load_projects()
+
+    project = projects.get(
+        project_id
+    )
+
+    if not project:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Projeto não encontrado",
+        )
+
+    output_folder = (
+        get_project_output_folder(
+            project
+        )
+    )
+
+    file_path = (
+        output_folder /
+        file_name
+    )
+
+    if not file_path.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail="Arquivo não encontrado",
+        )
+
+    return FileResponse(
+        path=file_path,
+        filename=file_name,
+    )
+
+@app.get(
+    "/projects/{project_id}/outputs"
+)
+def list_outputs(
+    project_id: str,
+):
+
+    projects = load_projects()
+
+    project = projects.get(
+        project_id
+    )
+
+    if not project:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Projeto não encontrado",
+        )
+
+    output_folder = (
+        get_project_output_folder(
+            project
+        )
+    )
+
+    outputs = []
+
+    for file_name in project.get(
+        "outputs",
+        [],
+    ):
+
+        file_path = (
+            output_folder /
+            file_name
+        )
+
+        if file_path.exists():
+
+            outputs.append(
+                {
+                    "name": file_name,
+                    "size_bytes": file_path.stat().st_size,
+                }
+            )
+
+    return outputs
+
+@app.get("/history")
+def get_history():
+
+    return HistoryService.get_history(
+        limit=100
+    )
+
+@app.get(
+    "/history/{execution_id}"
+)
+def get_execution(
+    execution_id: str,
+):
+
+    executions = (
+        HistoryService.get_history(
+            limit=1000
+        )
+    )
+
+    for execution in executions:
+
+        if (
+            execution.get(
+                "execution_id"
+            )
+            == execution_id
+        ):
+
+            return execution
+
+    raise HTTPException(
+        status_code=404,
+        detail="Execução não encontrada",
+    )
 
 @app.post("/execute/{project_id}")
 def execute_project(
