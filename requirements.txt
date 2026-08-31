@@ -5,3 +5,5 @@ pandas
 openpyxl
 pydantic
 pyyaml
+fastapi
+uvicorn
