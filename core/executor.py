@@ -15,9 +15,17 @@ class Executor:
 
         manifest = load_manifest(project_id)
 
-        project_path = Path(
-            manifest["project_path"]
+        bot_root = (
+            Path(__file__)
+            .resolve()
+            .parent
+            .parent
         )
+
+        project_path = (
+            bot_root /
+            manifest["project_path"]
+        ).resolve()
 
         script_name = manifest[
             "entrypoint"
@@ -38,6 +46,10 @@ class Executor:
             f"\nExecutando projeto: "
             f"{manifest['name']}"
         )
+
+        print(
+    f"Project Path: {project_path}"
+     )
 
         subprocess.run(
             [

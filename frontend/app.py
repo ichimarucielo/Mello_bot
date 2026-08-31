@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-OUTPUT_FOLDER = ROOT / "data" / "output"
+
 
 # =============================================================================
 # IMPORTS
@@ -64,11 +64,16 @@ def validate_uploaded_files(
     validation_results = []
     all_valid = True
 
-    for file_definition in project.get("required_files", []):
+    for file_definition in project.get(
+        "required_files",
+        [],
+    ):
 
         file_id = file_definition["id"]
 
-        uploaded_file = uploaded_files.get(file_id)
+        uploaded_file = uploaded_files.get(
+            file_id
+        )
 
         if uploaded_file is None:
             all_valid = False
@@ -76,10 +81,12 @@ def validate_uploaded_files(
 
         try:
 
-            saved_file = FileManager.save_uploaded_file(
-                project_id=project_id,
-                file_id=file_id,
-                uploaded_file=uploaded_file,
+            saved_file = (
+                FileManager.save_uploaded_file(
+                    project_id=project_id,
+                    file_id=file_id,
+                    uploaded_file=uploaded_file,
+                )
             )
 
             result = Validator.validate_file(
@@ -87,9 +94,14 @@ def validate_uploaded_files(
                 file_definition=file_definition,
             )
 
-            validation_results.append(result)
+            validation_results.append(
+                result
+            )
 
-            if not result.get("valid", False):
+            if not result.get(
+                "valid",
+                False,
+            ):
                 all_valid = False
 
         except Exception:
@@ -115,7 +127,25 @@ def validate_uploaded_files(
 
             all_valid = False
 
-    return validation_results, all_valid
+    return (
+        validation_results,
+        all_valid,
+    )
+
+
+def get_project_output_folder(
+    project: dict[str, Any],
+) -> Path:
+
+    project_path = Path(
+        project["project_path"]
+    )
+
+    return (
+        project_path /
+        "data" /
+        "output"
+    )
 
 
 # =============================================================================
@@ -333,10 +363,10 @@ if st.button(
         ):
 
            inputs_folder = (
-    ROOT /
-    "inputs" /
-    selected_project_id
-)
+            ROOT /
+            "inputs" /
+            selected_project_id
+            )
 
         Executor.run(
             project_id=selected_project_id,
@@ -355,7 +385,9 @@ if st.button(
 
         output_result = (
             OutputValidator.validate(
-                output_folder=OUTPUT_FOLDER,
+                output_folder=get_project_output_folder(
+                    project
+                ),
                 expected_outputs=project.get(
                     "outputs",
                     [],

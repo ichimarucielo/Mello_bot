@@ -8,7 +8,7 @@ description: >
   Conciliação SAP x Prefeitura e geração
   de workbook de faturamento.
 
-project_path: C:/dev/IA_QUARTETO
+project_path: ../IA_QUARTETO
 
 entrypoint:
   script: main.py
