@@ -127,12 +127,84 @@ async def run_project(
     files: list[UploadFile] = File(...),
 ):
 
+    projects = load_projects()
+
+    project = projects.get(
+        project_id
+    )
+
+    if not project:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Projeto não encontrado",
+        )
+
+    mapped_files = UploadMapper.map_uploaded_files(
+        project_id=project_id,
+        uploaded_files=files,
+    )
+
+    root = (
+        Path(__file__)
+        .resolve()
+        .parent
+        .parent
+    )
+
+    inputs_folder = (
+        root /
+        "inputs" /
+        project_id
+    )
+
+    Executor.run(
+        project_id=project_id,
+        files={
+            "prefeitura": str(
+                inputs_folder /
+                "prefeitura.csv"
+            ),
+            "fs10n": str(
+                inputs_folder /
+                "fs10n.xlsx"
+            ),
+            "zsd008": str(
+                inputs_folder /
+                "zsd008.xlsx"
+            ),
+        },
+    )
+
+    project_output_folder = (
+        Path(
+            project["project_path"]
+        ) /
+        "data" /
+        "output"
+    )
+
+    output_result = (
+        OutputValidator.validate(
+            output_folder=project_output_folder,
+            expected_outputs=project.get(
+                "outputs",
+                [],
+            ),
+        )
+    )
+
     return {
-        "project_id": project_id,
-        "files": [
-            file.filename
-            for file in files
-        ]
+        "status": "success",
+        "mapped_files": list(
+            mapped_files.keys()
+        ),
+        "outputs": [
+            output["name"]
+            for output in output_result[
+                "found"
+            ]
+        ],
     }
 
 @app.post("/test-upload")
