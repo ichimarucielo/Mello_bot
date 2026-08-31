@@ -271,7 +271,7 @@ else:
         ):
 
             st.success(
-                f"{display_name} - Score: {score}%"
+                f"{result['display_name']} - Score: {result['score']}%"
             )
 
         else:
@@ -332,9 +332,26 @@ if st.button(
             "Executando ETL..."
         ):
 
-            Executor.run(
-                selected_project_id
-            )
+           inputs_folder = (
+    ROOT /
+    "inputs" /
+    selected_project_id
+)
+
+        Executor.run(
+            project_id=selected_project_id,
+            files={
+                "prefeitura": str(
+                    inputs_folder / "prefeitura.csv"
+                ),
+                "fs10n": str(
+                    inputs_folder / "fs10n.xlsx"
+                ),
+                "zsd008": str(
+                    inputs_folder / "zsd008.xlsx"
+                ),
+            },
+        )
 
         output_result = (
             OutputValidator.validate(

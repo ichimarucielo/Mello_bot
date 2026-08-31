@@ -8,7 +8,10 @@ from core.manifest_loader import load_manifest
 class Executor:
 
     @staticmethod
-    def run(project_id: str) -> None:
+    def run(
+        project_id: str,
+        files: dict[str, str],
+    ) -> None:
 
         manifest = load_manifest(project_id)
 
@@ -26,39 +29,10 @@ class Executor:
         )
 
         if not script_path.exists():
-
             raise FileNotFoundError(
                 f"Entrypoint não encontrado: "
                 f"{script_path}"
             )
-
-        bot_root = (
-            Path(__file__)
-            .resolve()
-            .parent
-            .parent
-        )
-
-        inputs_folder = (
-            bot_root /
-            "inputs" /
-            project_id
-        )
-
-        prefeitura_file = (
-            inputs_folder /
-            "prefeitura.csv"
-        )
-
-        fs10n_file = (
-            inputs_folder /
-            "fs10n.xlsx"
-        )
-
-        zsd008_file = (
-            inputs_folder /
-            "zsd008.xlsx"
-        )
 
         print(
             f"\nExecutando projeto: "
@@ -70,12 +44,12 @@ class Executor:
                 sys.executable,
                 script_name,
                 "--prefeitura",
-                str(prefeitura_file),
+                files["prefeitura"],
                 "--fs10n",
-                str(fs10n_file),
+                files["fs10n"],
                 "--zsd008",
-                str(zsd008_file),
+                files["zsd008"],
             ],
             cwd=project_path,
-            check=True
+            check=True,
         )
