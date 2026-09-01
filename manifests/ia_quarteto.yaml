@@ -17,6 +17,7 @@ required_files:
 
   - id: prefeitura
     display_name: Prefeitura
+    cli_argument: "--prefeitura"
     accepted_extensions:
       - csv
     required_columns:
@@ -27,6 +28,7 @@ required_files:
 
   - id: fs10n
     display_name: FS10N
+    cli_argument: "--fs10n"
     accepted_extensions:
       - xlsx
     required_columns:
@@ -36,6 +38,7 @@ required_files:
 
   - id: zsd008
     display_name: ZSD008
+    cli_argument: "--zsd008"
     accepted_extensions:
       - xlsx
     required_columns:

@@ -1,7 +1,6 @@
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from api.schemas import HealthResponse, RunResponse
-from api.schemas import HealthResponse
 from core.executor import Executor
 from core.registry import load_projects
 from fastapi import File
@@ -29,6 +28,46 @@ def get_project_output_folder(
         / "data"
         / "output"
     )
+
+def build_project_files(
+    project_id: str,
+    project: dict,
+) -> dict[str, str]:
+
+    root = (
+        Path(__file__)
+        .resolve()
+        .parent
+        .parent
+    )
+
+    inputs_folder = (
+        root /
+        "inputs" /
+        project_id
+    )
+
+    files = {}
+
+    for required_file in project.get(
+        "required_files",
+        [],
+    ):
+
+        file_id = required_file["id"]
+
+        extension = (
+            required_file[
+                "accepted_extensions"
+            ][0]
+        )
+
+        files[file_id] = str(
+            inputs_folder /
+            f"{file_id}.{extension}"
+        )
+
+    return files
 
 @app.get(
     "/health",
@@ -219,46 +258,33 @@ def execute_project(
 
     projects = load_projects()
 
-    if project_id not in projects:
+    project = projects.get(
+        project_id
+    )
+
+    if not project:
 
         raise HTTPException(
             status_code=404,
             detail=f"Projeto '{project_id}' não encontrado.",
         )
 
-    root = (
-        Path(__file__)
-        .resolve()
-        .parent
-        .parent
-    )
-
-    inputs_folder = (
-        root /
-        "inputs" /
-        project_id
-    )
-
     try:
+
+        project_files = build_project_files(
+            project_id=project_id,
+            project=project,
+        )
 
         Executor.run(
             project_id=project_id,
-            files={
-                "prefeitura": str(
-                    inputs_folder / "prefeitura.csv"
-                ),
-                "fs10n": str(
-                    inputs_folder / "fs10n.xlsx"
-                ),
-                "zsd008": str(
-                    inputs_folder / "zsd008.xlsx"
-                ),
-            },
+            files=project_files,
         )
 
         return {
             "status": "success",
             "project_id": project_id,
+            "files": project_files,
         }
 
     except Exception as error:
@@ -267,14 +293,17 @@ def execute_project(
             status_code=500,
             detail=str(error),
         )
-
+    
 @app.post(
     "/projects/{project_id}/run",
     response_model=RunResponse,
 )
 async def run_project(
     project_id: str,
-    files: list[UploadFile] = File(...),
+    files: Annotated[
+        list[UploadFile],
+        File(description="Arquivos do projeto a serem processados"),
+    ] = ...,
 ):
 
     projects = load_projects()
@@ -308,22 +337,14 @@ async def run_project(
         project_id
     )
 
+    project_files = build_project_files(
+        project_id=project_id,
+        project=project,
+    )
+
     Executor.run(
         project_id=project_id,
-        files={
-            "prefeitura": str(
-                inputs_folder /
-                "prefeitura.csv"
-            ),
-            "fs10n": str(
-                inputs_folder /
-                "fs10n.xlsx"
-            ),
-            "zsd008": str(
-                inputs_folder /
-                "zsd008.xlsx"
-            ),
-        },
+        files=project_files,
     )
 
     project_output_folder = (
@@ -359,7 +380,10 @@ async def run_project(
 
 @app.post("/test-upload")
 async def test_upload(
-    files: list[UploadFile] = File(...)
+    files: Annotated[
+        list[UploadFile],
+        File(description="Arquivos de teste"),
+    ] = ...,
 ):
 
     return {

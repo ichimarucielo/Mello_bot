@@ -1,0 +1,33 @@
+id: antifraude
+
+name: Antifraude
+
+category: risco
+
+description: >
+  Tratamento e saneamento de base antifraude.
+
+project_path: ../Antifraude_etl
+
+entrypoint:
+  script: main.py
+
+required_files:
+
+  - id: base_antifraude
+
+    display_name: Base Antifraude
+
+    cli_argument: "--input-file"
+
+    accepted_extensions:
+      - xlsx
+
+    required_columns:
+      - Child
+      - MID
+      - Product Description
+      - Total Amount Due
+
+outputs:
+  - antifraude_vf.xlsx

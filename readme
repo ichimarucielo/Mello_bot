@@ -1,0 +1,489 @@
+# MELLO BOT
+
+Plataforma para execução de ETLs orientada por manifestos, com upload inteligente, validação automática, execução desacoplada e API REST para integração com interfaces web e automações.
+
+## Visão geral
+
+O MELLO BOT foi pensado para automatizar a execução de fluxos de ETL sem acoplar a lógica de negócio ao frontend. O projeto identifica arquivos automaticamente, valida colunas e estrutura, dispara a execução do ETL em um projeto externo e expõe os resultados por API e interface web.
+
+A arquitetura central do sistema é:
+
+- Manifestos definem os projetos e os arquivos esperados
+- O backend identifica os arquivos enviados pelo usuário
+- A validação verifica colunas e regras mínimas
+- O executor dispara a rotina do projeto externo
+- O frontend e a API consultam os resultados e o histórico
+
+## Principais funcionalidades
+
+- Descoberta automática de projetos via manifestos
+- Recebimento de múltiplos arquivos em upload multipart
+- Identificação do tipo de arquivo pela estrutura de colunas
+- Validação de arquivos obrigatórios e colunas esperadas
+- Execução de ETLs externos por entrypoint configurado no manifesto
+- Consulta de histórico de execuções
+- API REST para integração com outros sistemas
+- Interface web em Streamlit para uso operacional
+
+## Stack tecnológica
+
+- Python
+- FastAPI
+- Streamlit
+- Pydantic
+- PyYAML
+- Pandas
+- OpenPyXL
+- python-multipart
+
+## Estrutura do projeto
+
+```text
+mello_bot/
+├── api/
+│   ├── app.py
+│   └── schemas.py
+├── core/
+│   ├── executor.py
+│   ├── file_manager.py
+│   ├── history_service.py
+│   ├── identifier.py
+│   ├── manifest_loader.py
+│   ├── orchestrator.py
+│   ├── output_validator.py
+│   ├── registry.py
+│   ├── upload_mapper.py
+│   ├── validator.py
+│   └── execution_logger.py
+├── frontend/
+│   └── app.py
+├── inputs/
+├── logs/
+├── manifests/
+├── main.py
+├── requirements.txt
+├── readme
+├── test_app_routes.py
+└── templates/
+```
+
+## Conceito central: manifestos
+
+O sistema não conhece os projetos de forma fixa. Ele os descobre a partir de manifestos em `manifests/`.
+
+Cada manifesto descreve:
+
+- identificador do projeto
+- nome e categoria
+- caminho do projeto externo
+- script de entrada do ETL
+- arquivos esperados
+- colunas obrigatórias
+- outputs esperados
+
+Exemplo de manifesto:
+
+```yaml
+id: ia_quarteto
+
+name: Faturamento - Check e Report
+category: faturamento
+
+description: >
+  Conciliação SAP x Prefeitura e geração
+  de workbook de faturamento.
+
+project_path: ../IA_QUARTETO
+
+entrypoint:
+  script: main.py
+
+required_files:
+  - id: prefeitura
+    display_name: Prefeitura
+    accepted_extensions:
+      - csv
+    required_columns:
+      - Numero NF
+      - Numerp RPS
+      - CNPJ
+      - Valor Serviço
+
+  - id: fs10n
+    display_name: FS10N
+    accepted_extensions:
+      - xlsx
+    required_columns:
+      - Nº documento
+      - Conta
+      - Montante em moeda interna
+
+  - id: zsd008
+    display_name: ZSD008
+    accepted_extensions:
+      - xlsx
+    required_columns:
+      - Nº Nota Fiscal
+      - N° RPS
+      - Fatura Billing
+      - Valor Bruto
+
+outputs:
+  - Check_Faturamento.xlsx
+  - Report_Faturamento.xlsx
+```
+
+A ideia é que o projeto externo possa ser qualquer ETL que siga o contrato esperado, e o MELLO BOT apenas o orquestra.
+
+## Fluxo de execução
+
+### 1. Carregamento dos projetos
+
+O sistema varre todos os arquivos `.yaml` em `manifests/` e monta um dicionário de projetos com `core.registry.load_projects()`.
+
+### 2. Upload de arquivos
+
+O usuário envia os arquivos esperados via API ou via Streamlit. O backend aceita múltiplos arquivos em `multipart/form-data`.
+
+### 3. Identificação dos arquivos
+
+A classe `Identifier` compara as colunas dos arquivos carregados com as colunas esperadas pelos manifestos. Isso gera um `best_match` e um score de confiança.
+
+### 4. Validação
+
+O validador checa se cada arquivo está presente, se o extension é aceita e se as colunas exigidas foram atendidas.
+
+### 5. Execução do ETL
+
+O `Executor` resolve o projeto, localiza o `entrypoint` e executa o script do projeto usando o Python do ambiente atual.
+
+### 6. Resultado
+
+O sistema valida os arquivos esperados em `output` e devolve uma resposta de sucesso, parcial ou falha, além de registrar o histórico.
+
+## Componentes principais
+
+### API REST
+
+Localizada em `api/app.py`.
+
+Endpoints principais:
+
+- `GET /health`
+- `GET /projects`
+- `GET /projects/{project_id}`
+- `GET /projects/{project_id}/outputs`
+- `GET /projects/{project_id}/outputs/{file_name}`
+- `GET /history`
+- `GET /history/{execution_id}`
+- `POST /execute/{project_id}`
+- `POST /projects/{project_id}/run`
+- `POST /test-upload`
+
+### Frontend Streamlit
+
+Localizado em `frontend/app.py`.
+
+A interface permite:
+
+- selecionar um projeto
+- enviar arquivos obrigatórios
+- validar estrutura dos arquivos
+- executar o ETL
+- visualizar outputs e histórico
+
+### Core
+
+- `registry.py`: carregamento de manifestos
+- `manifest_loader.py`: leitura direta de um manifesto específico
+- `upload_mapper.py`: identifica/mapeia arquivos enviados
+- `validator.py`: valida estrutura dos arquivos
+- `output_validator.py`: valida presença dos outputs esperados
+- `executor.py`: execução do ETL
+- `history_service.py`: leitura do histórico em `logs/`
+- `execution_logger.py`: gravação de eventos e métricas
+
+## Requisitos
+
+Use Python 3.10+.
+
+Instale as dependências:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Como rodar
+
+### 1. Iniciar a API FastAPI
+
+```bash
+uvicorn api.app:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 2. Iniciar a interface Streamlit
+
+```bash
+streamlit run frontend/app.py
+```
+
+### 3. Executar o entrypoint principal da aplicação
+
+```bash
+python main.py
+```
+
+## Exemplos de uso da API
+
+### Health check
+
+```bash
+curl http://localhost:8000/health
+```
+
+### Listar projetos
+
+```bash
+curl http://localhost:8000/projects
+```
+
+### Fazer upload dos arquivos de um projeto
+
+```bash
+curl -X POST "http://localhost:8000/projects/ia_quarteto/run" \
+  -F "files=@inputs/ia_quarteto/prefeitura.csv" \
+  -F "files=@inputs/ia_quarteto/fs10n.xlsx" \
+  -F "files=@inputs/ia_quarteto/zsd008.xlsx"
+```
+
+### Consultar outputs
+
+```bash
+curl http://localhost:8000/projects/ia_quarteto/outputs
+```
+
+## Estrutura de arquivos de entrada
+
+Os arquivos enviados pelo usuário são armazenados em `inputs/<project_id>/`.
+
+Exemplo:
+
+```text
+inputs/
+└── ia_quarteto/
+    ├── prefeitura.csv
+    ├── fs10n.xlsx
+    └── zsd008.xlsx
+```
+
+## Histórico
+
+Os logs de execução ficam em `logs/` e são carregados pelo `HistoryService` para consulta por API e UI.
+
+## Observações importantes
+
+- O projeto é extensível por manifesto e não por código fixo
+- O `Executor` é desacoplado da interface de entrada
+- O sistema depende do contrato de cada projeto estar explícito no manifesto
+- O mapeamento de arquivos é feito por autenticação semântica de colunas, não por nome do arquivo
+
+## Boas práticas para novos projetos
+
+1. Crie o projeto externo com seu próprio `main.py`
+2. Defina o `project_path` corretamente no manifesto
+3. Declare os arquivos obrigatórios e as colunas esperadas
+4. Crie os outputs esperados nos caminhos configurados
+5. Valide o projeto com os arquivos de exemplo antes da produção
+
+## Conclusão
+
+O MELLO BOT é uma plataforma de orquestração de ETLs baseadas em manifestos, com foco em:
+
+- automação
+- rastreabilidade
+- validação inteligente
+- integração via API
+- execução desacoplada
+
+Ele foi pensado para atender projetos que exigem múltiplos uploads, validação estrutural e processo de execução externo, sem acoplar a lógica de negócio ao frontend.
+
+Toda execução gera um log.
+
+Exemplo:
+
+{
+  "execution_id": "20260831_102147",
+  "status": "success",
+  "duration_seconds": 5.8
+}
+
+Outputs
+
+Cada projeto define seus artefatos esperados.
+
+Exemplo:
+
+outputs:
+  - Check_Faturamento.xlsx
+  - Report_Faturamento.xlsx
+
+
+Após a execução:
+
+OutputValidator
+
+
+confirma a existência dos arquivos.
+
+API REST
+Health
+GET /health
+
+
+Resposta:
+
+{
+  "status": "ok"
+}
+
+Listar Projetos
+GET /projects
+
+Obter Projeto
+GET /projects/{project_id}
+
+Executar Projeto
+
+Usando inputs já existentes.
+
+POST /execute/{project_id}
+
+Executar Projeto Completo
+
+Upload + identificação + execução
+
+POST /projects/{project_id}/run
+
+
+Resposta:
+
+{
+  "status": "success",
+  "mapped_files": [
+    "prefeitura",
+    "fs10n",
+    "zsd008"
+  ],
+  "outputs": [
+    "Check_Faturamento.xlsx",
+    "Report_Faturamento.xlsx"
+  ]
+}
+
+Listar Outputs
+GET /projects/{project_id}/outputs
+
+Download de Output
+GET /projects/{project_id}/outputs/{file_name}
+
+Histórico
+GET /history
+
+Execução Específica
+GET /history/{execution_id}
+
+Princípios Arquiteturais
+Simplicidade
+
+Evitar:
+
+Microsserviços
+Message Brokers
+Kubernetes
+Celery
+RabbitMQ
+
+
+enquanto não forem realmente necessários.
+
+Manifest Driven
+
+Novos projetos devem ser adicionados por manifestos.
+
+Não por código.
+
+Reutilização
+
+Toda regra de negócio deve ficar em:
+
+core/
+
+
+Nunca:
+
+api/
+
+
+ou
+
+frontend/
+
+Um Runtime Único
+
+Premissa atual:
+
+Projetos Pandas/OpenPyXL
+
+
+Portanto:
+
+Um único ambiente Python
+
+
+é suficiente.
+
+Roadmap
+Concluído
+✅ Streamlit
+✅ Executor desacoplado
+✅ Manifest relativo
+✅ UploadMapper
+✅ Identifier
+✅ Validator
+✅ OutputValidator
+✅ FastAPI
+✅ Run endpoint
+✅ Outputs API
+✅ History API
+✅ Pydantic inicial
+
+Próximas Etapas
+⬜ Schemas Pydantic completos
+⬜ Limpeza de código temporário
+⬜ Dockerfile
+⬜ docker-compose
+⬜ Deploy
+⬜ Integração Power Apps
+
+Estado Atual
+
+O MELLO BOT deixou de ser uma automação isolada.
+
+Hoje ele é uma plataforma capaz de:
+
+Receber arquivos
+↓
+Identificar
+↓
+Validar
+↓
+Executar ETLs
+↓
+Gerar artefatos
+↓
+Disponibilizar resultados
+↓
+Registrar histórico
+
+
+com suporte a múltiplos projetos e múltiplas interfaces de consumo.

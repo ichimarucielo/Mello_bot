@@ -13,7 +13,9 @@ class Executor:
         files: dict[str, str],
     ) -> None:
 
-        manifest = load_manifest(project_id)
+        manifest = load_manifest(
+            project_id
+        )
 
         bot_root = (
             Path(__file__)
@@ -27,9 +29,11 @@ class Executor:
             manifest["project_path"]
         ).resolve()
 
-        script_name = manifest[
-            "entrypoint"
-        ]["script"]
+        script_name = (
+            manifest["entrypoint"][
+                "script"
+            ]
+        )
 
         script_path = (
             project_path /
@@ -37,6 +41,7 @@ class Executor:
         )
 
         if not script_path.exists():
+
             raise FileNotFoundError(
                 f"Entrypoint não encontrado: "
                 f"{script_path}"
@@ -48,20 +53,42 @@ class Executor:
         )
 
         print(
-    f"Project Path: {project_path}"
-     )
+            f"Project Path: "
+            f"{project_path}"
+        )
+
+        args = [
+            sys.executable,
+            script_name,
+        ]
+
+        for required_file in manifest.get(
+            "required_files",
+            [],
+        ):
+
+            cli_argument = (
+                required_file.get(
+                    "cli_argument"
+                )
+            )
+
+            if not cli_argument:
+                continue
+
+            file_id = (
+                required_file["id"]
+            )
+
+            args.extend(
+                [
+                    cli_argument,
+                    files[file_id],
+                ]
+            )
 
         subprocess.run(
-            [
-                sys.executable,
-                script_name,
-                "--prefeitura",
-                files["prefeitura"],
-                "--fs10n",
-                files["fs10n"],
-                "--zsd008",
-                files["zsd008"],
-            ],
+            args,
             cwd=project_path,
             check=True,
         )
