@@ -1,5 +1,7 @@
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
+from api.schemas import HealthResponse, RunResponse
+from api.schemas import HealthResponse
 from core.executor import Executor
 from core.registry import load_projects
 from fastapi import File
@@ -28,12 +30,15 @@ def get_project_output_folder(
         / "output"
     )
 
-@app.get("/health")
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+)
 def health():
 
-    return {
-        "status": "ok",
-    }
+    return HealthResponse(
+        status="ok"
+    )
 
 
 @app.get("/projects")
@@ -263,7 +268,10 @@ def execute_project(
             detail=str(error),
         )
 
-@app.post("/projects/{project_id}/run")
+@app.post(
+    "/projects/{project_id}/run",
+    response_model=RunResponse,
+)
 async def run_project(
     project_id: str,
     files: list[UploadFile] = File(...),
@@ -361,3 +369,4 @@ async def test_upload(
             for file in files
         ]
     }
+
