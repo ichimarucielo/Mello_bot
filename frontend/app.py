@@ -137,14 +137,16 @@ def get_project_output_folder(
     project: dict[str, Any],
 ) -> Path:
 
-    project_path = Path(
-        project["project_path"]
+    output_folder = project.get(
+        "output_folder",
+        "data/output",
     )
 
     return (
-        project_path /
-        "data" /
-        "output"
+        Path(
+            project["project_path"]
+        )
+        / output_folder
     )
 
 

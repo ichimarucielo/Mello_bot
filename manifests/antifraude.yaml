@@ -8,18 +8,15 @@ description: >
   Tratamento e saneamento de base antifraude.
 
 project_path: ../Antifraude_etl
+output_folder: data/final
 
 entrypoint:
-  script: main.py
+  script: src/main.py
 
 required_files:
-
   - id: base_antifraude
-
     display_name: Base Antifraude
-
     cli_argument: "--input-file"
-
     accepted_extensions:
       - xlsx
 

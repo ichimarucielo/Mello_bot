@@ -87,8 +87,21 @@ class Executor:
                 ]
             )
 
-        subprocess.run(
+        result = subprocess.run(
             args,
             cwd=project_path,
-            check=True,
+            capture_output=True,
+            text=True,
         )
+
+        if result.returncode != 0:
+
+            raise RuntimeError(
+                f"""
+        STDOUT:
+        {result.stdout}
+
+        STDERR:
+        {result.stderr}
+        """
+            )

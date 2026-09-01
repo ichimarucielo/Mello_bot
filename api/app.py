@@ -21,12 +21,16 @@ def get_project_output_folder(
     project: dict,
 ) -> Path:
 
+    output_folder = project.get(
+        "output_folder",
+        "data/output",
+    )
+
     return (
         Path(
             project["project_path"]
         )
-        / "data"
-        / "output"
+        / output_folder
     )
 
 def build_project_files(
@@ -187,10 +191,12 @@ def list_outputs(
         )
 
     output_folder = (
-        get_project_output_folder(
-            project
+    get_project_output_folder(
+        project
         )
     )
+
+    print(output_folder)
 
     outputs = []
 
@@ -348,11 +354,9 @@ async def run_project(
     )
 
     project_output_folder = (
-        Path(
-            project["project_path"]
-        ) /
-        "data" /
-        "output"
+        get_project_output_folder(
+            project
+        )
     )
 
     output_result = (
