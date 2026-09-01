@@ -3,6 +3,7 @@ import subprocess
 import sys
 
 from core.manifest_loader import load_manifest
+from core.settings import BASE_DIR
 
 
 class Executor:
@@ -13,31 +14,16 @@ class Executor:
         files: dict[str, str],
     ) -> None:
 
-        manifest = load_manifest(
-            project_id
-        )
-
-        bot_root = (
-            Path(__file__)
-            .resolve()
-            .parent
-            .parent
-        )
+        manifest = load_manifest(project_id)
 
         project_path = (
-            bot_root /
-            manifest["project_path"]
+            BASE_DIR /
+            manifest.project_path
         ).resolve()
-
-        script_name = (
-            manifest["entrypoint"][
-                "script"
-            ]
-        )
 
         script_path = (
             project_path /
-            script_name
+            manifest.entrypoint.script
         )
 
         if not script_path.exists():
@@ -49,7 +35,7 @@ class Executor:
 
         print(
             f"\nExecutando projeto: "
-            f"{manifest['name']}"
+            f"{manifest.name}"
         )
 
         print(
@@ -59,31 +45,24 @@ class Executor:
 
         args = [
             sys.executable,
-            script_name,
+            manifest.entrypoint.script,
         ]
 
-        for required_file in manifest.get(
-            "required_files",
-            [],
-        ):
+        for required_file in manifest.required_files:
 
-            cli_argument = (
-                required_file.get(
-                    "cli_argument"
-                )
+            cli_argument = getattr(
+                required_file,
+                "cli_argument",
+                None,
             )
 
             if not cli_argument:
                 continue
 
-            file_id = (
-                required_file["id"]
-            )
-
             args.extend(
                 [
                     cli_argument,
-                    files[file_id],
+                    files[required_file.id],
                 ]
             )
 
@@ -98,10 +77,10 @@ class Executor:
 
             raise RuntimeError(
                 f"""
-        STDOUT:
-        {result.stdout}
+STDOUT:
+{result.stdout}
 
-        STDERR:
-        {result.stderr}
-        """
+STDERR:
+{result.stderr}
+"""
             )

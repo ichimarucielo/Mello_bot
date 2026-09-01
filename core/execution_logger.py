@@ -1,12 +1,12 @@
 import json
-
-from pathlib import Path
 from datetime import datetime
+
+from core.settings import LOGS_DIR
 
 
 class ExecutionLogger:
 
-    LOG_FOLDER = Path("logs")
+    LOG_FOLDER = LOGS_DIR
 
     @classmethod
     def ensure_folder(cls) -> None:

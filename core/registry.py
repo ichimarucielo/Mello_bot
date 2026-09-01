@@ -1,19 +1,16 @@
-from pathlib import Path
-import yaml
+from core.manifest_loader import load_manifest
+from core.models import Manifest
+from core.settings import MANIFESTS_DIR
 
-MANIFESTS_PATH = Path("manifests")
 
+def load_projects() -> dict[str, Manifest]:
+    projects: dict[str, Manifest] = {}
 
-def load_projects() -> dict:
+    for manifest_file in MANIFESTS_DIR.glob("*.yaml"):
+        project_id = manifest_file.stem
 
-    projects = {}
+        manifest = load_manifest(project_id)
 
-    for manifest_file in MANIFESTS_PATH.glob("*.yaml"):
-
-        with open(manifest_file, "r", encoding="utf-8") as file:
-
-            manifest = yaml.safe_load(file)
-
-            projects[manifest["id"]] = manifest
+        projects[manifest.id] = manifest
 
     return projects

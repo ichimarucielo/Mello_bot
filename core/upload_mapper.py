@@ -1,6 +1,8 @@
+from pathlib import Path
+
 from core.file_manager import FileManager
 from core.identifier import Identifier
-from pathlib import Path
+
 
 class UploadMapper:
 

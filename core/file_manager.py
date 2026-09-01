@@ -1,9 +1,11 @@
 from pathlib import Path
 
+from core.settings import INPUTS_DIR
+
 
 class FileManager:
 
-    UPLOADS_PATH = Path("inputs")
+    UPLOADS_PATH = INPUTS_DIR
 
     @classmethod
     def ensure_folders(

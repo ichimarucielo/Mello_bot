@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from core.column_normalizer import normalize_column
 from core.registry import load_projects
 from core.validator import Validator
 
@@ -12,12 +13,12 @@ class Identifier:
         file_path: Path
     ) -> dict:
 
-        file_columns = [
-            str(column).strip().upper()
+        file_columns = {
+            normalize_column(column)
             for column in Validator.get_columns(
                 file_path
             )
-        ]
+        }
 
         candidates = []
 
@@ -26,19 +27,15 @@ class Identifier:
         for project in projects.values():
 
             for file_definition in (
-                project["required_files"]
+                project.required_files
             ):
 
                 required_columns = [
-                    str(column).strip().upper()
-                    for column in file_definition.get(
-                        "required_columns",
-                        []
-                    )
+                    normalize_column(column)
+                    for column in file_definition.required_columns
                 ]
 
                 if not required_columns:
-
                     continue
 
                 matched_columns = sum(
@@ -57,12 +54,9 @@ class Identifier:
 
                 candidates.append(
                     {
-                        "file_id": file_definition[
-                            "id"
-                        ],
-                        "display_name": file_definition[
-                            "display_name"
-                        ],
+                        "project_id": project.id,
+                        "file_id": file_definition.id,
+                        "display_name": file_definition.display_name,
                         "confidence": confidence,
                         "matched_columns": matched_columns,
                         "required_columns": len(

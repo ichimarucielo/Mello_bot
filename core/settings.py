@@ -1,0 +1,12 @@
+from pathlib import Path
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+MANIFESTS_DIR = BASE_DIR / "manifests"
+
+INPUTS_DIR = BASE_DIR / "inputs"
+
+OUTPUTS_DIR = BASE_DIR / "outputs"
+
+LOGS_DIR = BASE_DIR / "logs"

@@ -1,11 +1,11 @@
 import json
 
-from pathlib import Path
+from core.settings import LOGS_DIR
 
 
 class HistoryService:
 
-    LOG_FOLDER = Path("logs")
+    LOG_FOLDER = LOGS_DIR
 
     @classmethod
     def get_history(
@@ -14,7 +14,6 @@ class HistoryService:
     ) -> list:
 
         if not cls.LOG_FOLDER.exists():
-
             return []
 
         executions = []
@@ -36,7 +35,6 @@ class HistoryService:
                     )
 
             except Exception:
-
                 continue
 
         executions.sort(

@@ -2,18 +2,18 @@ from pathlib import Path
 
 import pandas as pd
 
+from core.column_normalizer import normalize_column
+from core.models import RequiredFile
+
 
 class Validator:
 
     @staticmethod
-    def get_columns(file_path: Path) -> list:
-
-        extension = file_path.suffix.lower()
+    def get_columns(file_path: Path) -> listextension = file_path.suffix.lower()
 
         if extension == ".csv":
 
             try:
-
                 df = pd.read_csv(
                     file_path,
                     nrows=0,
@@ -52,22 +52,20 @@ class Validator:
         required_columns: list[str]
     ) -> dict:
 
-        columns = [
-            str(column).strip().upper()
-            for column in cls.get_columns(file_path)
-        ]
+        original_columns = cls.get_columns(file_path)
 
-        required_columns = [
-            str(column).strip().upper()
-            for column in required_columns
-        ]
+        normalized_columns = {
+            normalize_column(column)
+            for column in original_columns
+        }
 
         missing_columns = []
 
         for column in required_columns:
 
-            if column not in columns:
+            normalized_required = normalize_column(column)
 
+            if normalized_required not in normalized_columns:
                 missing_columns.append(column)
 
         valid = len(missing_columns) == 0
@@ -89,7 +87,7 @@ class Validator:
         return {
             "valid": valid,
             "score": score,
-            "columns_found": columns,
+            "columns_found": original_columns,
             "missing_columns": missing_columns
         }
 
@@ -97,23 +95,16 @@ class Validator:
     def validate_file(
         cls,
         file_path: Path,
-        file_definition: dict
+        file_definition: RequiredFile
     ) -> dict:
-
-        required_columns = (
-            file_definition.get(
-                "required_columns",
-                []
-            )
-        )
 
         validation_result = cls.validate_columns(
             file_path=file_path,
-            required_columns=required_columns
+            required_columns=file_definition.required_columns
         )
 
         return {
-            "file_id": file_definition["id"],
-            "display_name": file_definition["display_name"],
+            "file_id": file_definition.id,
+            "display_name": file_definition.display_name,
             **validation_result
         }

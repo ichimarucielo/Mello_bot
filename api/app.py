@@ -10,6 +10,12 @@ from core.output_validator import OutputValidator
 from typing import Annotated
 from fastapi.responses import FileResponse
 from core.history_service import HistoryService
+from core.models import Manifest
+from core.settings import (
+    BASE_DIR,
+    INPUTS_DIR,
+)
+
 
 app = FastAPI(
     title="MELLO BOT API",
@@ -18,13 +24,14 @@ app = FastAPI(
 
 
 def get_project_output_folder(
-    project: dict,
+    project: Manifest,
 ) -> Path:
 
-    output_folder = project.get(
-        "output_folder",
-        "data/output",
-    )
+    output_folder = getattr(
+    project,
+    "output_folder",
+    "data/output",
+)
 
     return (
         Path(
@@ -35,7 +42,7 @@ def get_project_output_folder(
 
 def build_project_files(
     project_id: str,
-    project: dict,
+    project: Manifest,
 ) -> dict[str, str]:
 
     root = (
@@ -46,24 +53,19 @@ def build_project_files(
     )
 
     inputs_folder = (
-        root /
-        "inputs" /
-        project_id
+    INPUTS_DIR /
+    project_id
     )
 
     files = {}
 
-    for required_file in project.get(
-        "required_files",
-        [],
-    ):
+    for required_file in project.required_files:
 
-        file_id = required_file["id"]
+        file_id = required_file.id
 
         extension = (
-            required_file[
-                "accepted_extensions"
-            ][0]
+            required_file
+            .accepted_extensions[0]
         )
 
         files[file_id] = str(

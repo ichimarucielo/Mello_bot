@@ -1,11 +1,14 @@
 from pathlib import Path
+
 import yaml
+
+from core.models import Manifest
 
 
 MANIFESTS_PATH = Path("manifests")
 
 
-def load_manifest(project_id: str) -> dict:
+def load_manifest(project_id: str) -> Manifest:
     manifest_file = MANIFESTS_PATH / f"{project_id}.yaml"
 
     if not manifest_file.exists():
@@ -14,4 +17,6 @@ def load_manifest(project_id: str) -> dict:
         )
 
     with open(manifest_file, "r", encoding="utf-8") as file:
-        return yaml.safe_load(file)
+        data = yaml.safe_load(file)
+
+    return Manifest.model_validate(data)
