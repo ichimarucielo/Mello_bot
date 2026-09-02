@@ -1,4 +1,3 @@
-from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from api.schemas import (
     ExecuteResponse,
@@ -9,70 +8,19 @@ from api.schemas import (
     RunResponse,
 )
 from core.executor import Executor
-from core.registry import load_projects
+from core.orchestrator import Orchestrator
 from fastapi import File
 from fastapi import UploadFile
-from core.upload_mapper import UploadMapper
-from core.output_validator import OutputValidator
 from typing import Annotated
 from fastapi.responses import FileResponse
 from core.history_service import HistoryService
-from core.models import Manifest
-from core.settings import (
-    BASE_DIR,
-    INPUTS_DIR,
-)
-
+from core.exceptions import ProjectNotFoundError
 
 app = FastAPI(
     title="MELLO BOT API",
     version="1.0.0",
 )
 
-
-def get_project_output_folder(
-    project: Manifest,
-) -> Path:
-
-    output_folder = getattr(
-    project,
-    "output_folder",
-    "data/output",
-)
-
-    return (
-        BASE_DIR /
-        project.project_path /
-        output_folder
-    )
-
-def build_project_files(
-    project_id: str,
-    project: Manifest,
-) -> dict[str, str]:
-
-    inputs_folder = (
-    INPUTS_DIR /
-    project_id
-    )
-
-    files = {}
-
-    for required_file in project.required_files:
-
-        file_id = required_file.id
-
-        extension = (
-            required_file
-            .accepted_extensions[0]
-        )
-
-        files[file_id] = str(
-            inputs_folder /
-            f"{file_id}.{extension}"
-        )
-
-    return files
 
 @app.get(
     "/health",
@@ -93,7 +41,7 @@ def list_projects():
 
     projects = []
 
-    for project in load_projects().values():
+    for project in Orchestrator.list_projects():
 
         projects.append(
             {
@@ -114,13 +62,11 @@ def get_project(
     project_id: str,
 ):
 
-    projects = load_projects()
-
-    project = projects.get(
-        project_id
-    )
-
-    if not project:
+    try:
+        project = Orchestrator.get_project(
+            project_id
+        )
+    except ProjectNotFoundError:
 
         raise HTTPException(
             status_code=404,
@@ -137,13 +83,11 @@ def download_output(
     file_name: str,
 ):
 
-    projects = load_projects()
-
-    project = projects.get(
-        project_id
-    )
-
-    if not project:
+    try:
+        project = Orchestrator.get_project(
+            project_id
+        )
+    except ProjectNotFoundError:
 
         raise HTTPException(
             status_code=404,
@@ -151,7 +95,7 @@ def download_output(
         )
 
     output_folder = (
-        get_project_output_folder(
+        Orchestrator.get_project_output_folder(
             project
         )
     )
@@ -181,13 +125,11 @@ def list_outputs(
     project_id: str,
 ):
 
-    projects = load_projects()
-
-    project = projects.get(
-        project_id
-    )
-
-    if not project:
+    try:
+        project = Orchestrator.get_project(
+            project_id
+        )
+    except ProjectNotFoundError:
 
         raise HTTPException(
             status_code=404,
@@ -195,7 +137,7 @@ def list_outputs(
         )
 
     output_folder = (
-    get_project_output_folder(
+    Orchestrator.get_project_output_folder(
         project
         )
     )
@@ -268,13 +210,11 @@ def execute_project(
     project_id: str,
 ):
 
-    projects = load_projects()
-
-    project = projects.get(
-        project_id
-    )
-
-    if not project:
+    try:
+        project = Orchestrator.get_project(
+            project_id
+        )
+    except ProjectNotFoundError:
 
         raise HTTPException(
             status_code=404,
@@ -283,7 +223,7 @@ def execute_project(
 
     try:
 
-        project_files = build_project_files(
+        project_files = Orchestrator.build_project_files(
             project_id=project_id,
             project=project,
         )
@@ -317,60 +257,18 @@ async def run_project(
         File(description="Arquivos do projeto a serem processados"),
     ] = ...,
 ):
+    try:
+        return Orchestrator.run_project(
+            project_id=project_id,
+            uploaded_files=files,
+        )
 
-    projects = load_projects()
-
-    project = projects.get(
-        project_id
-    )
-
-    if not project:
+    except ProjectNotFoundError:
 
         raise HTTPException(
             status_code=404,
             detail="Projeto não encontrado",
         )
-
-    mapped_files = UploadMapper.map_uploaded_files(
-        project_id=project_id,
-        uploaded_files=files,
-    )
-
-    project_files = build_project_files(
-        project_id=project_id,
-        project=project,
-    )
-
-    Executor.run(
-        project_id=project_id,
-        files=project_files,
-    )
-
-    project_output_folder = (
-        get_project_output_folder(
-            project
-        )
-    )
-
-    output_result = (
-        OutputValidator.validate(
-            output_folder=project_output_folder,
-            expected_outputs=project.outputs,
-        )
-    )
-
-    return {
-        "status": "success",
-        "mapped_files": list(
-            mapped_files.keys()
-        ),
-        "outputs": [
-            output["name"]
-            for output in output_result[
-                "found"
-            ]
-        ],
-    }
 
 @app.post("/test-upload")
 async def test_upload(

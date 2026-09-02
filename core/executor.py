@@ -1,8 +1,11 @@
+from datetime import datetime
 from pathlib import Path
 import subprocess
 import sys
 
+from core.enums import ExecutionStatus
 from core.manifest_loader import load_manifest
+from core.models import ExecutionResult
 from core.settings import BASE_DIR
 
 
@@ -12,7 +15,9 @@ class Executor:
     def run(
         project_id: str,
         files: dict[str, str],
-    ) -> None:
+    ) -> ExecutionResult:
+
+        started_at = datetime.now()
 
         manifest = load_manifest(project_id)
 
@@ -50,11 +55,7 @@ class Executor:
 
         for required_file in manifest.required_files:
 
-            cli_argument = getattr(
-                required_file,
-                "cli_argument",
-                None,
-            )
+            cli_argument = required_file.cli_argument
 
             if not cli_argument:
                 continue
@@ -73,14 +74,33 @@ class Executor:
             text=True,
         )
 
+        duration_seconds = round(
+            (
+                datetime.now()
+                - started_at
+            ).total_seconds(),
+            2,
+        )
+
         if result.returncode != 0:
 
-            raise RuntimeError(
-                f"""
+            return ExecutionResult(
+                execution_id="",
+                project_id=project_id,
+                status=ExecutionStatus.FAILED,
+                duration_seconds=duration_seconds,
+                error_message=f"""
 STDOUT:
 {result.stdout}
 
 STDERR:
 {result.stderr}
-"""
+""",
             )
+
+        return ExecutionResult(
+            execution_id="",
+            project_id=project_id,
+            status=ExecutionStatus.SUCCESS,
+            duration_seconds=duration_seconds,
+        )

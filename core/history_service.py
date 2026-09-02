@@ -39,8 +39,8 @@ class HistoryService:
 
         executions.sort(
             key=lambda x: x.get(
-                "start_time",
-                ""
+                "started_at",
+                x.get("start_time", "")
             ),
             reverse=True
         )

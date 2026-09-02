@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-
+from core.models import ExecutionResult
 from core.settings import LOGS_DIR
 
 
@@ -19,10 +19,18 @@ class ExecutionLogger:
     @classmethod
     def save(
         cls,
-        payload: dict
+        payload: ExecutionResult | dict,
     ) -> None:
 
         cls.ensure_folder()
+
+        if isinstance(
+            payload,
+            ExecutionResult,
+        ):
+            payload = payload.model_dump(
+                mode="json"
+            )
 
         execution_id = payload[
             "execution_id"
@@ -36,14 +44,14 @@ class ExecutionLogger:
         with open(
             log_file,
             "w",
-            encoding="utf-8"
+            encoding="utf-8",
         ) as file:
 
             json.dump(
                 payload,
                 file,
                 ensure_ascii=False,
-                indent=4
+                indent=4,
             )
 
     @classmethod
