@@ -26,6 +26,10 @@ class Orchestrator:
         return ManifestGenerator.extract_columns(file_path)
 
     @staticmethod
+    def suggest_manifest(file_name: str, columns: list[str]) -> dict[str, str]:
+        return ManifestGenerator.suggest(file_name, columns)
+
+    @staticmethod
     def build_manifest_data(**kwargs: Any) -> dict[str, Any]:
         return ManifestGenerator.build_manifest_data(**kwargs)
 

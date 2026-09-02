@@ -3,6 +3,7 @@ fastapi
 uvicorn
 pandas
 openpyxl
+xlrd
 pydantic
 pyyaml
 fastapi

@@ -16,7 +16,11 @@ def load_manifest(project_id: str) -> Manifest:
             f"Manifest não encontrado: {manifest_file}"
         )
 
-    with open(manifest_file, "r", encoding="utf-8") as file:
-        data = yaml.safe_load(file)
-
-    return Manifest.model_validate(data)
+    try:
+        with open(manifest_file, "r", encoding="utf-8") as file:
+            data = yaml.safe_load(file)
+        return Manifest.model_validate(data)
+    except Exception as error:
+        raise ValueError(
+            f"Manifesto inválido em {manifest_file}: {error}"
+        ) from error

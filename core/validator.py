@@ -31,7 +31,18 @@ class Validator:
                     sep=";"
                 )
 
-            return list(df.columns)
+            except pd.errors.EmptyDataError as error:
+                raise ValueError(
+                    f"Arquivo sem colunas: {file_path}"
+                ) from error
+
+            columns = list(df.columns)
+            if not columns:
+                raise ValueError(
+                    f"Arquivo sem colunas: {file_path}"
+                )
+
+            return columns
 
         if extension == ".xlsx":
 
@@ -40,7 +51,13 @@ class Validator:
                 nrows=0
             )
 
-            return list(df.columns)
+            columns = list(df.columns)
+            if not columns:
+                raise ValueError(
+                    f"Arquivo sem colunas: {file_path}"
+                )
+
+            return columns
 
         raise ValueError(
             f"Extensão não suportada: {extension}"

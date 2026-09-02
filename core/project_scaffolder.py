@@ -3,6 +3,7 @@ import shutil
 
 from core.models import Manifest
 from core.settings import BASE_DIR
+from core.template_engine import TemplateEngine
 
 
 class ProjectScaffolder:
@@ -26,7 +27,7 @@ class ProjectScaffolder:
 
         if not entrypoint.exists():
             entrypoint.write_text(
-                """from pathlib import Path\n\n\ndef main() -> None:\n    # TODO: implement the ETL generated from the manifest.\n    pass\n\n\nif __name__ == \"__main__\":\n    main()\n""",
+                TemplateEngine.render_main(manifest),
                 encoding="utf-8",
             )
 

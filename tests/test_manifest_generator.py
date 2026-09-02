@@ -85,3 +85,18 @@ def test_xls_extension_is_preserved_in_manifest():
 
     assert manifest.required_files[0].accepted_extensions == ["xls"]
     assert manifest.entrypoint.script == "src/main.py"
+
+
+def test_suggest_builds_manifest_fields_from_file_structure():
+    suggestions = ManifestGenerator.suggest(
+        "FS10N.xlsx",
+        ["Centro de Custo", "Montante", "Conta"],
+    )
+
+    assert suggestions == {
+        "project_id": "fs10n",
+        "name": "Fs10n",
+        "category": "financeiro",
+        "description": "ETL gerado a partir do arquivo FS10N.xlsx.",
+        "display_name": "Fs10n",
+    }

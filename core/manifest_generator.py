@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Any
 from datetime import datetime
+import re
+import unicodedata
 
 import yaml
 
@@ -10,6 +12,47 @@ from core.validator import Validator
 
 
 class ManifestGenerator:
+
+    @staticmethod
+    def suggest(
+        file_name: str,
+        columns: list[str],
+    ) -> dict[str, str]:
+        source_name = Path(file_name).stem
+        normalized_name = unicodedata.normalize(
+            "NFKD",
+            source_name,
+        ).encode("ascii", "ignore").decode("ascii")
+        project_id = re.sub(
+            r"[^a-z0-9]+",
+            "_",
+            normalized_name.lower(),
+        ).strip("_") or "novo_projeto"
+        project_name = " ".join(
+            part.capitalize()
+            for part in re.split(r"[_\-\s]+", source_name)
+            if part
+        ) or "Novo Projeto"
+
+        searchable_text = " ".join(columns).lower()
+        category = "geral"
+        for candidate, keywords in {
+            "financeiro": ("valor", "montante", "conta", "fatura"),
+            "faturamento": ("nota", "rps", "billing", "nf"),
+            "estoque": ("estoque", "sku", "quantidade"),
+            "clientes": ("cliente", "cnpj", "email"),
+        }.items():
+            if any(keyword in searchable_text for keyword in keywords):
+                category = candidate
+                break
+
+        return {
+            "project_id": project_id,
+            "name": project_name,
+            "category": category,
+            "description": f"ETL gerado a partir do arquivo {file_name}.",
+            "display_name": project_name,
+        }
 
     @staticmethod
     def list_manifest_files() -> list[Path]:

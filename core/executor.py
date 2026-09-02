@@ -60,10 +60,23 @@ class Executor:
             if not cli_argument:
                 continue
 
+            file_path = files.get(required_file.id)
+            if not file_path:
+                raise ValueError(
+                    f"Arquivo obrigatório não mapeado: "
+                    f"{required_file.id}"
+                )
+
+            if not Path(file_path).exists():
+                raise FileNotFoundError(
+                    f"Arquivo de entrada não encontrado para "
+                    f"{required_file.id}: {file_path}"
+                )
+
             args.extend(
                 [
                     cli_argument,
-                    files[required_file.id],
+                    file_path,
                 ]
             )
 

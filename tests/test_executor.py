@@ -20,6 +20,8 @@ def make_manifest(project_path, script="main.py"):
 def test_run_returns_success_result(tmp_path: Path):
     project_path = tmp_path
     (project_path / "main.py").touch()
+    input_path = tmp_path / "input.csv"
+    input_path.touch()
     manifest = make_manifest(".")
 
     with patch("core.executor.load_manifest", return_value=manifest), patch(
@@ -29,18 +31,20 @@ def test_run_returns_success_result(tmp_path: Path):
         run_process.return_value.stdout = "ok"
         run_process.return_value.stderr = ""
 
-        result = Executor.run("demo", {"input": "input.csv"})
+        result = Executor.run("demo", {"input": str(input_path)})
 
     assert result.project_id == "demo"
     assert result.status == ExecutionStatus.SUCCESS
     run_process.assert_called_once()
     assert "--input" in run_process.call_args.args[0]
-    assert "input.csv" in run_process.call_args.args[0]
+    assert str(input_path) in run_process.call_args.args[0]
 
 
 def test_run_returns_failed_result_with_process_output(tmp_path: Path):
     project_path = tmp_path
     (project_path / "main.py").touch()
+    input_path = tmp_path / "input.csv"
+    input_path.touch()
     manifest = make_manifest(".")
 
     with patch("core.executor.load_manifest", return_value=manifest), patch(
@@ -50,7 +54,7 @@ def test_run_returns_failed_result_with_process_output(tmp_path: Path):
         run_process.return_value.stdout = "stdout error"
         run_process.return_value.stderr = "stderr error"
 
-        result = Executor.run("demo", {"input": "input.csv"})
+        result = Executor.run("demo", {"input": str(input_path)})
 
     assert result.status == ExecutionStatus.FAILED
     assert "stdout error" in result.error_message

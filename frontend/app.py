@@ -368,6 +368,11 @@ def render_create_project_page() -> None:
             temporary_path.unlink(missing_ok=True)
 
     st.success(f"2. {len(columns)} coluna(s) extraída(s)")
+    suggestions = Orchestrator.suggest_manifest(sample_file.name, columns)
+    st.info(
+        "Copilot determinístico: sugestões geradas a partir do nome do arquivo "
+        "e das colunas. Revise antes de salvar."
+    )
     analysis_col, columns_col = st.columns([1, 2])
     analysis_col.metric("Linhas de cabeçalho", len(columns))
     analysis_col.caption(f"Formato detectado: {suffix.lstrip('.').upper()}")
@@ -376,12 +381,21 @@ def render_create_project_page() -> None:
 
     form_col, preview_col = st.columns([1, 1])
     with form_col:
-        project_id = st.text_input("ID do projeto", placeholder="meu_etl")
-        project_name = st.text_input("Nome do projeto", placeholder="Meu ETL")
-        category = st.text_input("Categoria", value="geral")
+        project_id = st.text_input(
+            "ID do projeto",
+            value=suggestions["project_id"],
+        )
+        project_name = st.text_input(
+            "Nome do projeto",
+            value=suggestions["name"],
+        )
+        category = st.text_input(
+            "Categoria",
+            value=suggestions["category"],
+        )
         description = st.text_area(
             "Descrição",
-            placeholder="Descreva o que este projeto processa.",
+            value=suggestions["description"],
         )
         project_path = st.text_input(
             "Caminho do projeto",
@@ -394,7 +408,7 @@ def render_create_project_page() -> None:
         )
         display_name = st.text_input(
             "Nome exibido do arquivo",
-            value=sample_file.name,
+            value=suggestions["display_name"],
         )
         required_columns = st.multiselect(
             "4. Quais colunas fazem parte do processo?",
