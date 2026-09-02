@@ -1,6 +1,13 @@
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
-from api.schemas import HealthResponse, RunResponse
+from api.schemas import (
+    ExecuteResponse,
+    HealthResponse,
+    HistoryResponse,
+    OutputResponse,
+    ProjectResponse,
+    RunResponse,
+)
 from core.executor import Executor
 from core.registry import load_projects
 from fastapi import File
@@ -34,23 +41,15 @@ def get_project_output_folder(
 )
 
     return (
-        Path(
-            project["project_path"]
-        )
-        / output_folder
+        BASE_DIR /
+        project.project_path /
+        output_folder
     )
 
 def build_project_files(
     project_id: str,
     project: Manifest,
 ) -> dict[str, str]:
-
-    root = (
-        Path(__file__)
-        .resolve()
-        .parent
-        .parent
-    )
 
     inputs_folder = (
     INPUTS_DIR /
@@ -86,7 +85,10 @@ def health():
     )
 
 
-@app.get("/projects")
+@app.get(
+    "/projects",
+    response_model=list[ProjectResponse],
+)
 def list_projects():
 
     projects = []
@@ -95,20 +97,19 @@ def list_projects():
 
         projects.append(
             {
-                "id": project["id"],
-                "name": project["name"],
-                "category": project.get(
-                    "category"
-                ),
-                "description": project.get(
-                    "description"
-                ),
+                "id": project.id,
+                "name": project.name,
+                "category": project.category,
+                "description": project.description,
             }
         )
 
     return projects
 
-@app.get("/projects/{project_id}")
+@app.get(
+    "/projects/{project_id}",
+    response_model=ProjectResponse,
+)
 def get_project(
     project_id: str,
 ):
@@ -173,7 +174,8 @@ def download_output(
     )
 
 @app.get(
-    "/projects/{project_id}/outputs"
+    "/projects/{project_id}/outputs",
+    response_model=list[OutputResponse],
 )
 def list_outputs(
     project_id: str,
@@ -198,14 +200,9 @@ def list_outputs(
         )
     )
 
-    print(output_folder)
-
     outputs = []
 
-    for file_name in project.get(
-        "outputs",
-        [],
-    ):
+    for file_name in project.outputs:
 
         file_path = (
             output_folder /
@@ -223,7 +220,10 @@ def list_outputs(
 
     return outputs
 
-@app.get("/history")
+@app.get(
+    "/history",
+    response_model=list[HistoryResponse],
+)
 def get_history():
 
     return HistoryService.get_history(
@@ -231,7 +231,8 @@ def get_history():
     )
 
 @app.get(
-    "/history/{execution_id}"
+    "/history/{execution_id}",
+    response_model=HistoryResponse,
 )
 def get_execution(
     execution_id: str,
@@ -259,7 +260,10 @@ def get_execution(
         detail="Execução não encontrada",
     )
 
-@app.post("/execute/{project_id}")
+@app.post(
+    "/execute/{project_id}",
+    response_model=ExecuteResponse,
+)
 def execute_project(
     project_id: str,
 ):
@@ -332,19 +336,6 @@ async def run_project(
         uploaded_files=files,
     )
 
-    root = (
-        Path(__file__)
-        .resolve()
-        .parent
-        .parent
-    )
-
-    inputs_folder = (
-        root /
-        "inputs" /
-        project_id
-    )
-
     project_files = build_project_files(
         project_id=project_id,
         project=project,
@@ -364,10 +355,7 @@ async def run_project(
     output_result = (
         OutputValidator.validate(
             output_folder=project_output_folder,
-            expected_outputs=project.get(
-                "outputs",
-                [],
-            ),
+            expected_outputs=project.outputs,
         )
     )
 

@@ -9,7 +9,8 @@ from core.models import RequiredFile
 class Validator:
 
     @staticmethod
-    def get_columns(file_path: Path) -> listextension = file_path.suffix.lower()
+    def get_columns(file_path: Path) -> list:
+        extension = file_path.suffix.lower()
 
         if extension == ".csv":
 

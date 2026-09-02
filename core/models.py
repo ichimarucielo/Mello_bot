@@ -1,7 +1,7 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List
-
+from pydantic import BaseModel, ConfigDict, Field
 from core.enums import ExecutionStatus
 
 
@@ -18,22 +18,21 @@ class RequiredFile(BaseModel):
     required_columns: List[str]
 
 
+
 class Manifest(BaseModel):
+    model_config = ConfigDict(
+    extra="allow"
+    )
+    
     id: str
-
     name: str
-
     category: str
-
     description: str
-
     project_path: str
-
     entrypoint: EntryPoint
-
-    required_files: List[RequiredFile]
-
-    outputs: List[str]
+    required_files: list[RequiredFile]
+    outputs: list[str]
+    tags: list[str] = Field(default_factory=list)
 
 
 class ExecutionContext(BaseModel):

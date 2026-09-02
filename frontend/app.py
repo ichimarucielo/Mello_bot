@@ -6,15 +6,6 @@ from typing import Any
 
 import streamlit as st
 
-# =============================================================================
-# PATHS
-# =============================================================================
-
-ROOT = Path(__file__).resolve().parent.parent
-
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 
 
 # =============================================================================
@@ -27,6 +18,7 @@ from core.file_manager import FileManager
 from core.history_service import HistoryService
 from core.output_validator import OutputValidator
 from core.registry import load_projects
+from core.settings import INPUTS_DIR
 from core.validator import Validator
 
 # =============================================================================
@@ -69,7 +61,7 @@ def validate_uploaded_files(
         [],
     ):
 
-        file_id = file_definition["id"]
+        file_id = file_definition.id
 
         uploaded_file = uploaded_files.get(
             file_id
@@ -143,10 +135,8 @@ def get_project_output_folder(
     )
 
     return (
-        Path(
-            project["project_path"]
-        )
-        / output_folder
+    Path(project.project_path)
+    / output_folder
     )
 
 
@@ -221,8 +211,8 @@ selected_project_id = st.selectbox(
 
 project = projects[selected_project_id]
 
-st.subheader(project["name"])
-st.write(project["description"])
+st.subheader(project.name)
+st.write(project.description)
 
 st.divider()
 
@@ -242,7 +232,7 @@ for file_definition in project.get(
 ):
 
     uploaded_files[
-        file_definition["id"]
+        file_definition.id
     ] = st.file_uploader(
         label=file_definition[
             "display_name"
@@ -250,7 +240,7 @@ for file_definition in project.get(
         type=file_definition[
             "accepted_extensions"
         ],
-        key=file_definition["id"],
+        key=file_definition.id,
     )
 
 st.divider()
@@ -364,36 +354,32 @@ if st.button(
             "Executando ETL..."
         ):
 
-           inputs_folder = (
-            ROOT /
-            "inputs" /
-            selected_project_id
+            inputs_folder = (
+                INPUTS_DIR /
+                selected_project_id
             )
 
-        Executor.run(
-            project_id=selected_project_id,
-            files={
-                "prefeitura": str(
-                    inputs_folder / "prefeitura.csv"
-                ),
-                "fs10n": str(
-                    inputs_folder / "fs10n.xlsx"
-                ),
-                "zsd008": str(
-                    inputs_folder / "zsd008.xlsx"
-                ),
-            },
-        )
+            Executor.run(
+                project_id=selected_project_id,
+                files={
+                    "prefeitura": str(
+                        inputs_folder / "prefeitura.csv"
+                    ),
+                    "fs10n": str(
+                        inputs_folder / "fs10n.xlsx"
+                    ),
+                    "zsd008": str(
+                        inputs_folder / "zsd008.xlsx"
+                    ),
+                },
+            )
 
         output_result = (
             OutputValidator.validate(
                 output_folder=get_project_output_folder(
                     project
                 ),
-                expected_outputs=project.get(
-                    "outputs",
-                    [],
-                ),
+                expected_outputs=project.outputs,
             )
         )
 
@@ -427,7 +413,7 @@ if st.button(
             {
                 "execution_id": execution_id,
                 "project_id": selected_project_id,
-                "project_name": project["name"],
+                "project_name": project.name,
                 "status": status,
                 "start_time": start_time.isoformat(),
                 "end_time": end_time.isoformat(),
@@ -460,7 +446,7 @@ if st.button(
             {
                 "execution_id": execution_id,
                 "project_id": selected_project_id,
-                "project_name": project["name"],
+                "project_name": project.name,
                 "status": "error",
                 "error": str(error),
             }
