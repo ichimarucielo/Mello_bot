@@ -2,11 +2,12 @@ import json
 
 from core.enums import ExecutionStatus
 from core.execution_logger import ExecutionLogger
+from core.execution_repository import JsonExecutionRepository
 from core.models import ExecutionResult
 
 
 def test_save_execution_result_writes_standard_observability_fields(tmp_path):
-    ExecutionLogger.LOG_FOLDER = tmp_path
+    ExecutionLogger.set_repository(JsonExecutionRepository(tmp_path))
     result = ExecutionResult(
         execution_id="exec-123",
         project_id="ia_quarteto",
@@ -26,7 +27,7 @@ def test_save_execution_result_writes_standard_observability_fields(tmp_path):
 
 
 def test_save_accepts_dictionary_payload(tmp_path):
-    ExecutionLogger.LOG_FOLDER = tmp_path
+    ExecutionLogger.set_repository(JsonExecutionRepository(tmp_path))
     payload = {
         "execution_id": "exec-dict",
         "project_id": "demo",

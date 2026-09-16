@@ -130,7 +130,6 @@ class Orchestrator:
             "output_folder",
             "data/output",
         )
-
         return BASE_DIR / project.project_path / output_folder
 
     @staticmethod
@@ -214,6 +213,7 @@ class Orchestrator:
         cls,
         project_id: str,
         uploaded_files: list[Any],
+        execution_id: str | None = None,
     ) -> RunProjectResult:
 
         project = cls.get_project(project_id)
@@ -228,9 +228,7 @@ class Orchestrator:
             project=project,
         )
 
-        execution_id = (
-            ExecutionLogger.create_execution_id()
-        )
+        execution_id = execution_id or ExecutionLogger.create_execution_id()
 
         context = ExecutionContext(
             execution_id=execution_id,
@@ -263,22 +261,20 @@ class Orchestrator:
             for uploaded_file in uploaded_files
         ]
 
-        if (
-            execution_result.status
-            == ExecutionStatus.FAILED
-        ):
-            raise RuntimeError(
-                execution_result.error_message
-            )
-
         output_result = OutputValidator.validate(
             output_folder=cls.get_project_output_folder(project),
             expected_outputs=project.outputs,
         )
 
-        ExecutionLogger.save(
-            execution_result
-        )
+        execution_result.outputs = [
+            output["name"]
+            for output in output_result["found"]
+        ]
+
+        ExecutionLogger.save(execution_result)
+
+        if execution_result.status == ExecutionStatus.FAILED:
+            raise RuntimeError(execution_result.error_message)
 
         return RunProjectResult(
             status=execution_result.status.value,
@@ -290,8 +286,3 @@ class Orchestrator:
                 for output in output_result["found"]
             ],
         )
-
-        execution_result.outputs = [
-            output["name"]
-            for output in output_result["found"]
-        ]

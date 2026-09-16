@@ -1,12 +1,32 @@
-import json
 from datetime import datetime
+
 from core.models import ExecutionResult
 from core.settings import LOGS_DIR
+from core.execution_repository import (
+    ExecutionRepository,
+    JsonExecutionRepository,
+    SQLiteExecutionRepository,
+)
+from core.settings import DATABASE_PATH, LOGS_DIR
 
 
 class ExecutionLogger:
 
     LOG_FOLDER = LOGS_DIR
+    _repository: ExecutionRepository | None = None
+
+    @classmethod
+    def set_repository(cls, repository: ExecutionRepository) -> None:
+        cls._repository = repository
+
+    @classmethod
+    def _get_repository(cls) -> ExecutionRepository:
+        if cls._repository is None:
+            cls._repository = SQLiteExecutionRepository(
+                DATABASE_PATH,
+                legacy_logs_folder=cls.LOG_FOLDER,
+            )
+        return cls._repository
 
     @classmethod
     def ensure_folder(cls) -> None:
@@ -22,8 +42,6 @@ class ExecutionLogger:
         payload: ExecutionResult | dict,
     ) -> None:
 
-        cls.ensure_folder()
-
         if isinstance(
             payload,
             ExecutionResult,
@@ -32,27 +50,7 @@ class ExecutionLogger:
                 mode="json"
             )
 
-        execution_id = payload[
-            "execution_id"
-        ]
-
-        log_file = (
-            cls.LOG_FOLDER
-            / f"{execution_id}.json"
-        )
-
-        with open(
-            log_file,
-            "w",
-            encoding="utf-8",
-        ) as file:
-
-            json.dump(
-                payload,
-                file,
-                ensure_ascii=False,
-                indent=4,
-            )
+        cls._get_repository().save(payload)
 
     @classmethod
     def create_execution_id(

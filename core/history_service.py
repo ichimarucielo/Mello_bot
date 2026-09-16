@@ -1,11 +1,28 @@
-import json
-
-from core.settings import LOGS_DIR
+from core.execution_repository import (
+    ExecutionRepository,
+    JsonExecutionRepository,
+    SQLiteExecutionRepository,
+)
+from core.settings import DATABASE_PATH, LOGS_DIR
 
 
 class HistoryService:
 
     LOG_FOLDER = LOGS_DIR
+    _repository: ExecutionRepository | None = None
+
+    @classmethod
+    def set_repository(cls, repository: ExecutionRepository) -> None:
+        cls._repository = repository
+
+    @classmethod
+    def _get_repository(cls) -> ExecutionRepository:
+        if cls._repository is None:
+            cls._repository = SQLiteExecutionRepository(
+                DATABASE_PATH,
+                legacy_logs_folder=cls.LOG_FOLDER,
+            )
+        return cls._repository
 
     @classmethod
     def get_history(
@@ -13,36 +30,8 @@ class HistoryService:
         limit: int = 10
     ) -> list:
 
-        if not cls.LOG_FOLDER.exists():
-            return []
+        return cls._get_repository().list(limit)
 
-        executions = []
-
-        for log_file in cls.LOG_FOLDER.glob(
-            "*.json"
-        ):
-
-            try:
-
-                with open(
-                    log_file,
-                    "r",
-                    encoding="utf-8"
-                ) as file:
-
-                    executions.append(
-                        json.load(file)
-                    )
-
-            except Exception:
-                continue
-
-        executions.sort(
-            key=lambda x: x.get(
-                "started_at",
-                x.get("start_time", "")
-            ),
-            reverse=True
-        )
-
-        return executions[:limit]
+    @classmethod
+    def get_execution(cls, execution_id: str) -> dict | None:
+        return cls._get_repository().get(execution_id)

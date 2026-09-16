@@ -31,8 +31,29 @@ class ExecuteResponse(BaseModel):
 
 class HistoryResponse(BaseModel):
     execution_id: str
+    project_id: str | None = None
     status: str
     duration_seconds: float | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    error_message: str | None = None
+    uploaded_files: list[str] = []
+    outputs: list[str] = []
+
+
+class CreateExecutionRequest(BaseModel):
+    project_id: str
+
+
+class CreateExecutionResponse(BaseModel):
+    execution_id: str
+    status: str
+
+
+class ExecutionFilesResponse(BaseModel):
+    execution_id: str
+    status: str
+    uploaded_files: list[str]
 
 
 class ErrorResponse(BaseModel):

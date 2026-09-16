@@ -1,11 +1,8 @@
-streamlit
 fastapi
 uvicorn
+pydantic
+pyyaml
 pandas
 openpyxl
 xlrd
-pydantic
-pyyaml
-fastapi
-uvicorn
 python-multipart

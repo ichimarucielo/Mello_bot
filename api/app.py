@@ -1,5 +1,8 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from api.schemas import (
+    CreateExecutionRequest,
+    CreateExecutionResponse,
+    ExecutionFilesResponse,
     ExecuteResponse,
     HealthResponse,
     HistoryResponse,
@@ -15,11 +18,109 @@ from typing import Annotated
 from fastapi.responses import FileResponse
 from core.history_service import HistoryService
 from core.exceptions import ProjectNotFoundError
+from core.execution_service import ExecutionService, StagedUpload
 
 app = FastAPI(
     title="MELLO BOT API",
     version="1.0.0",
 )
+
+
+@app.post(
+    "/executions",
+    response_model=CreateExecutionResponse,
+    status_code=202,
+)
+def create_execution(request: CreateExecutionRequest):
+    try:
+        execution = ExecutionService.create(request.project_id)
+    except ProjectNotFoundError:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    return {
+        "execution_id": execution["execution_id"],
+        "status": execution["status"],
+    }
+
+
+@app.post(
+    "/executions/{execution_id}/files",
+    response_model=ExecutionFilesResponse,
+    status_code=202,
+)
+async def upload_execution_files(
+    execution_id: str,
+    background_tasks: BackgroundTasks,
+    files: Annotated[
+        list[UploadFile],
+        File(description="Arquivos de entrada da execução"),
+    ] = ...,
+):
+    if HistoryService.get_execution(execution_id) is None:
+        raise HTTPException(status_code=404, detail="Execução não encontrada")
+
+    staged_files = [
+        StagedUpload(
+            name=file.filename or "arquivo",
+            content=await file.read(),
+        )
+        for file in files
+    ]
+    try:
+        uploaded_files = ExecutionService.stage_files(execution_id, staged_files)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Execução não encontrada")
+
+    background_tasks.add_task(ExecutionService.run, execution_id)
+    return {
+        "execution_id": execution_id,
+        "status": "pending",
+        "uploaded_files": uploaded_files,
+    }
+
+
+@app.get(
+    "/executions",
+    response_model=list[HistoryResponse],
+)
+def list_executions():
+    return HistoryService.get_history(limit=100)
+
+
+@app.get(
+    "/executions/{execution_id}",
+    response_model=HistoryResponse,
+)
+def get_execution_details(execution_id: str):
+    execution = HistoryService.get_execution(execution_id)
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Execução não encontrada")
+    return execution
+
+
+@app.get(
+    "/executions/{execution_id}/outputs",
+    response_model=list[OutputResponse],
+)
+def get_execution_outputs(execution_id: str):
+    execution = HistoryService.get_execution(execution_id)
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Execução não encontrada")
+
+    try:
+        project = Orchestrator.get_project(execution["project_id"])
+    except ProjectNotFoundError:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    output_folder = Orchestrator.get_project_output_folder(project)
+    return [
+        {
+            "name": output_name,
+            "size_bytes": (output_folder / output_name).stat().st_size,
+        }
+        for output_name in execution.get("outputs", [])
+        if (output_folder / output_name).is_file()
+    ]
 
 
 @app.get(
