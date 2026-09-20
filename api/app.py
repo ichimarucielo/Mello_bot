@@ -4,6 +4,7 @@ from api.schemas import (
     CreateExecutionResponse,
     ExecutionFilesResponse,
     ExecuteResponse,
+    HealthDetailResponse,
     HealthResponse,
     HistoryResponse,
     OutputResponse,
@@ -132,6 +133,14 @@ def health():
     return HealthResponse(
         status="ok"
     )
+
+
+@app.get(
+    "/health/details",
+    response_model=HealthDetailResponse,
+)
+def health_details():
+    return HealthService.diagnose_details()
 
 
 @app.get(

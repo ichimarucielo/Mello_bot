@@ -41,6 +41,12 @@ class Manifest(BaseModel):
 
     project_path: str
 
+    timeout_seconds: int = Field(
+        default=1800,
+        ge=1,
+        description="Timeout em segundos para a execução do ETL.",
+    )
+
     entrypoint: EntryPoint
 
     required_files: list[RequiredFile]

@@ -89,6 +89,7 @@ class ManifestGenerator:
             "category": category,
             "description": description,
             "project_path": project_path,
+            "timeout_seconds": 1800,
             "entrypoint": {"script": entrypoint},
             "required_files": [
                 {

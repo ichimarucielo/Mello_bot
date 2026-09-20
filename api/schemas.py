@@ -5,6 +5,17 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class HealthDetailResponse(BaseModel):
+    status: str
+    python: dict
+    manifests: dict
+    sqlite: dict
+    projects: list[dict]
+    outputs: list[dict]
+    permissions: list[dict]
+    problems: list[str]
+
+
 class ProjectResponse(BaseModel):
     id: str
     name: str
