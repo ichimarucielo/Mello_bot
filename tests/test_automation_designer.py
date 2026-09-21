@@ -15,16 +15,17 @@ from core.automation_designer import AutomationDesigner
 from core.models import AutomationAnalysis, AutomationRequest, Manifest
 
 
-PROMPT = "Recebo um Excel de faturamento e preciso comparar com SAP para encontrar divergencias."
+PROMPT = "Recebo diariamente um relatório FS10N exportado do SAP e um relatório de Billing."
 
 
 def test_mock_ai_service_returns_structured_analysis():
     analysis = MockAIService().analyze(PROMPT)
 
     assert isinstance(analysis, AutomationAnalysis)
-    assert analysis.project_id == "faturamento_sap"
-    assert {item["id"] for item in analysis.inputs} == {"faturamento", "sap"}
-    assert analysis.outputs == ["divergencias.xlsx"]
+    assert analysis.project_id == "conciliacao_sap_billing"
+    assert analysis.category == "financeiro"
+    assert {item["id"] for item in analysis.inputs} == {"sap", "billing"}
+    assert analysis.outputs == ["conciliacao.xlsx", "divergencias.xlsx"]
 
 
 def test_designer_accepts_injected_ai_service():
@@ -34,7 +35,7 @@ def test_designer_accepts_injected_ai_service():
 
     analysis = AutomationDesigner(FixedAIService()).analyze(PROMPT)
 
-    assert analysis.category == "faturamento"
+    assert analysis.category == "financeiro"
 
 
 def test_designer_generates_valid_manifest(tmp_path: Path, monkeypatch):
@@ -44,8 +45,10 @@ def test_designer_generates_valid_manifest(tmp_path: Path, monkeypatch):
     manifest = yaml.safe_load(designer.generate_manifest(PROMPT))
 
     validated = Manifest.model_validate(manifest)
-    assert validated.id == "faturamento_sap"
+    assert validated.id == "conciliacao_sap_billing"
     assert len(validated.required_files) == 2
+    assert [item.id for item in validated.required_files] == ["sap", "billing"]
+    assert validated.outputs == ["conciliacao.xlsx", "divergencias.xlsx"]
 
 
 def test_designer_creates_project_artifacts_and_executable_main(
@@ -56,8 +59,8 @@ def test_designer_creates_project_artifacts_and_executable_main(
 
     result = AutomationDesigner().create_project(PROMPT)
     project_path = Path(result.project_path)
-    input_one = tmp_path / "faturamento.xlsx"
-    input_two = tmp_path / "sap.xlsx"
+    input_one = tmp_path / "fs10n.xlsx"
+    input_two = tmp_path / "billing.xlsx"
     input_one.write_bytes(b"placeholder")
     input_two.write_bytes(b"placeholder")
 
@@ -65,9 +68,9 @@ def test_designer_creates_project_artifacts_and_executable_main(
         [
             sys.executable,
             result.entrypoint_path,
-            "--faturamento",
-            str(input_one),
             "--sap",
+            str(input_one),
+            "--billing",
             str(input_two),
         ],
         cwd=project_path,

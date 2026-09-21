@@ -244,6 +244,16 @@ python -m streamlit run frontend\app.py
 uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+Ou, no Windows, use o script dedicado:
+
+```bat
+scripts\start_mello_bot_api.bat
+```
+
+O `start_mello_bot.bat` inicia somente o Streamlit. Para usar a interface e a
+API ao mesmo tempo, abra dois terminais na raiz do projeto e execute um script
+em cada terminal.
+
 ### 4) Verificar saúde da API
 
 ```bash
