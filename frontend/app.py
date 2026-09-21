@@ -1,9 +1,14 @@
 import logging
 from datetime import datetime
+import json
+import os
 from pathlib import Path
 import tempfile
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 
@@ -12,6 +17,7 @@ import streamlit as st
 # =============================================================================
 
 from core.history_service import HistoryService
+from core.logger import log_automation_event
 from core.orchestrator import Orchestrator
 
 # =============================================================================
@@ -58,6 +64,220 @@ def load_history() -> list[dict]:
     except Exception:
         logger.exception("Erro carregando histórico")
         return []
+
+
+AI_API_URL = os.getenv("MELLO_BOT_API_URL", "http://localhost:8000")
+
+
+def call_ai_api(endpoint: str, prompt: str) -> dict:
+    request = Request(
+        f"{AI_API_URL.rstrip('/')}{endpoint}",
+        data=json.dumps({"prompt": prompt}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        try:
+            payload = json.loads(error.read().decode("utf-8"))
+            detail = payload.get("detail", "A API recusou a solicitação.")
+        except (ValueError, UnicodeDecodeError):
+            detail = "A API recusou a solicitação."
+        raise RuntimeError(f"{detail} (HTTP {error.code})") from error
+    except (URLError, TimeoutError, OSError) as error:
+        raise RuntimeError(
+            "Não foi possível conectar à API. Inicie scripts\\start_mello_bot_api.bat."
+        ) from error
+
+
+def read_artifact(path_value: str, fallback: str = "") -> str:
+    try:
+        return Path(path_value).read_text(encoding="utf-8")
+    except (OSError, TypeError):
+        return fallback
+
+
+def render_copy_button(content: str) -> None:
+    encoded_content = json.dumps(content)
+    components.html(
+        f"""
+        <button id="copy-manifest" style="padding: .45rem .8rem; cursor: pointer;">
+            📋 Copiar Manifesto
+        </button>
+        <span id="copy-status" style="margin-left: .5rem;"></span>
+        <script>
+        const content = {encoded_content};
+        const button = document.getElementById("copy-manifest");
+        const status = document.getElementById("copy-status");
+        button.addEventListener("click", async () => {{
+            try {{
+                await navigator.clipboard.writeText(content);
+                status.textContent = "Copiado";
+            }} catch (error) {{
+                status.textContent = "Selecione e copie o conteúdo acima";
+            }}
+        }});
+        </script>
+        """,
+        height=42,
+    )
+
+
+def render_mello_ai_page() -> None:
+    st.header("🤖 MELLO AI")
+    st.caption(
+        "Descreva um processo em linguagem natural e o MELLO BOT irá analisar, "
+        "gerar o manifesto e criar a estrutura inicial da automação."
+    )
+
+    examples = {
+        "SAP x Billing": (
+            "Recebo diariamente um relatório FS10N exportado do SAP e um relatório "
+            "de Billing. Preciso conciliar os documentos e gerar um Excel contendo "
+            "conciliados, divergentes, apenas SAP e apenas Billing."
+        ),
+        "SAP x Prefeitura": (
+            "Recebo relatórios do SAP e da Prefeitura. Preciso conciliar notas "
+            "fiscais e gerar um relatório de divergências."
+        ),
+        "Antifraude": (
+            "Recebo uma base de transações e preciso classificar registros "
+            "suspeitos para análise antifraude."
+        ),
+        "Power BI Dataset": (
+            "Recebo uma base operacional e preciso preparar um dataset para "
+            "consumo no Power BI."
+        ),
+    }
+    st.write("**Exemplos rápidos**")
+    example_columns = st.columns(len(examples))
+    for column, (label, example) in zip(example_columns, examples.items()):
+        if column.button(label, use_container_width=True, key=f"ai_example_{label}"):
+            st.session_state["mello_ai_prompt"] = example
+
+    prompt = st.text_area(
+        "Descreva o processo",
+        key="mello_ai_prompt",
+        height=180,
+        placeholder=(
+            "Recebo diariamente um relatório FS10N exportado do SAP e um relatório "
+            "de Billing.\n\nPreciso conciliar os documentos e gerar um Excel "
+            "contendo conciliados, divergentes, apenas SAP e apenas Billing."
+        ),
+    )
+    if not prompt.strip():
+        st.info("Descreva o processo ou escolha um exemplo rápido para começar.")
+        return
+
+    analysis_col, manifest_col, project_col = st.columns(3)
+    with analysis_col:
+        analyze_clicked = st.button(
+            "🔍 Analisar Processo",
+            type="primary",
+            use_container_width=True,
+        )
+    with manifest_col:
+        manifest_clicked = st.button(
+            "📄 Gerar Manifesto",
+            use_container_width=True,
+        )
+    with project_col:
+        project_clicked = st.button(
+            "🚀 Criar Projeto",
+            use_container_width=True,
+        )
+
+    if analyze_clicked:
+        log_automation_event("ai_analysis_requested")
+        try:
+            st.session_state["mello_ai_analysis"] = call_ai_api(
+                "/ai/analyze", prompt
+            )
+            st.success("Processo analisado com sucesso.")
+        except RuntimeError as error:
+            st.error(str(error))
+
+    if manifest_clicked:
+        log_automation_event("ai_manifest_requested")
+        try:
+            response = call_ai_api("/ai/manifest", prompt)
+            st.session_state["mello_ai_manifest"] = response["manifest"]
+            st.success("Manifesto gerado com sucesso.")
+        except (RuntimeError, KeyError) as error:
+            st.error(f"Não foi possível gerar o manifesto: {error}")
+
+    if project_clicked:
+        log_automation_event("ai_project_creation_requested")
+        try:
+            response = call_ai_api("/ai/create-project", prompt)
+            st.session_state["mello_ai_project"] = response
+            st.success("✅ Projeto criado com sucesso")
+        except RuntimeError as error:
+            st.error(f"Não foi possível criar o projeto: {error}")
+
+    analysis = st.session_state.get("mello_ai_analysis")
+    if analysis:
+        st.divider()
+        st.subheader("Análise do processo")
+        diagnostic_col, viability_col, complexity_col = st.columns(3)
+        diagnostic_col.info(analysis.get("diagnostic", "Sem diagnóstico."))
+        viability_col.success(analysis.get("viability", "Viabilidade não informada."))
+        complexity_col.warning(
+            f"Complexidade: {analysis.get('complexity', 'não informada')}"
+        )
+        input_col, output_col = st.columns(2)
+        with input_col:
+            st.write("**Inputs identificados**")
+            for item in analysis.get("inputs", []):
+                st.write(
+                    f"- `{item.get('id', '-')}`: {item.get('display_name', '-') } "
+                    f"({', '.join(item.get('accepted_extensions', [item.get('extension', '-')]))})"
+                )
+        with output_col:
+            st.write("**Outputs esperados**")
+            for output in analysis.get("outputs", []):
+                st.write(f"- `{output}`")
+
+    manifest = st.session_state.get("mello_ai_manifest")
+    if manifest:
+        st.divider()
+        st.subheader("Manifesto gerado")
+        st.code(manifest, language="yaml")
+        render_copy_button(manifest)
+
+    project = st.session_state.get("mello_ai_project")
+    if project:
+        st.divider()
+        st.subheader("Artefatos do projeto")
+        st.success("✅ Projeto criado com sucesso")
+        details = st.columns(3)
+        details[0].write(f"**Project ID**\n\n`{project.get('project_id', '-')}`")
+        details[1].write(f"**Project Path**\n\n`{project.get('project_path', '-')}`")
+        details[2].write(f"**Status**\n\n`{project.get('status', '-')}`")
+
+        manifest_content = read_artifact(
+            project.get("manifest_path"),
+            manifest or "Manifesto não disponível.",
+        )
+        readme_content = read_artifact(
+            project.get("readme_path"),
+            "README não disponível.",
+        )
+        main_content = read_artifact(
+            project.get("entrypoint_path"),
+            "Entrypoint não disponível.",
+        )
+        manifest_tab, readme_tab, main_tab = st.tabs(
+            ["manifest.yaml", "README.md", "main.py"]
+        )
+        with manifest_tab:
+            st.code(manifest_content, language="yaml")
+        with readme_tab:
+            st.code(readme_content, language="markdown")
+        with main_tab:
+            st.code(main_content, language="python")
 
 
 def render_dashboard(history: list[dict], project_count: int) -> None:
@@ -482,6 +702,7 @@ with st.sidebar:
     navigation = st.radio(
         "Navegação",
         [
+            "🤖 MELLO AI",
             "Executar",
             "Histórico",
             "Projetos",
@@ -509,6 +730,10 @@ render_dashboard(history, len(projects))
 
 if navigation == "Histórico":
     render_history_page(history)
+    st.stop()
+
+if navigation == "🤖 MELLO AI":
+    render_mello_ai_page()
     st.stop()
 
 if navigation == "Projetos":

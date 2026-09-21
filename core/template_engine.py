@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import yaml
 
@@ -6,6 +7,42 @@ from core.models import Manifest
 
 
 class TemplateEngine:
+
+    TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+
+    TEMPLATE_FILES = {
+        "generic": "generic_main.py.j2",
+        "reconciliation": "reconciliation_main.py.j2",
+        "consolidation": "consolidation_main.py.j2",
+        "antifraud": "antifraud_main.py.j2",
+        "powerbi": "powerbi_main.py.j2",
+        "validation": "validation_main.py.j2",
+    }
+
+    @classmethod
+    def render_pattern_main(cls, manifest: Manifest, pattern: str = "generic") -> str:
+        template_name = cls.TEMPLATE_FILES.get(pattern, cls.TEMPLATE_FILES["generic"])
+        template_path = cls.TEMPLATE_DIR / template_name
+        template = template_path.read_text(encoding="utf-8")
+        required_files = [
+            {
+                "id": required_file.id,
+                "cli_argument": required_file.cli_argument,
+                "argument_name": required_file.cli_argument.lstrip("-").replace("-", "_"),
+            }
+            for required_file in manifest.required_files
+            if required_file.cli_argument
+        ]
+        replacements = {
+            "{{ REQUIRED_FILES }}": json.dumps(required_files, ensure_ascii=False),
+            "{{ OUTPUTS }}": json.dumps(manifest.outputs, ensure_ascii=False),
+            "{{ OUTPUT_FOLDER }}": repr(getattr(manifest, "output_folder", "data/output")),
+            "{{ PROJECT_NAME }}": repr(manifest.name),
+            "{{ PROJECT_ID }}": repr(manifest.id),
+        }
+        for placeholder, value in replacements.items():
+            template = template.replace(placeholder, value)
+        return template
 
     @staticmethod
     def render_manifest(manifest: Manifest) -> str:
@@ -162,4 +199,12 @@ manifest.yaml
 - todos os outputs declarados devem ser gerados na pasta configurada;
 - a execucao deve retornar codigo zero em caso de sucesso;
 - o resultado deve ser revisado com dados reais antes de producao.
+
+## Proximos passos de implementacao
+
+- confirmar as colunas e chaves de negocio com os arquivos reais;
+- substituir os TODOs pela regra especifica do ETL;
+- revisar os nomes e a pasta dos outputs declarados no manifesto;
+- adicionar testes com casos validos, divergentes e arquivos vazios;
+- executar uma validacao end-to-end antes de publicar a automacao.
 '''

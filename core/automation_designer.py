@@ -39,7 +39,10 @@ class AutomationDesigner:
     def create_project(self, prompt: str) -> AutomationGenerationResult:
         analysis = self.analyze(prompt)
         manifest = ManifestGenerator.validate(analysis.manifest_data)
-        artifacts = ProjectScaffolder.create_automation_project(manifest)
+        artifacts = ProjectScaffolder.create_automation_project(
+            manifest,
+            pattern=analysis.pattern,
+        )
         log_automation_event(
             "manifest_generated",
             project_id=manifest.id,

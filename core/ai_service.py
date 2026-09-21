@@ -19,11 +19,35 @@ class MockAIService(AIService):
     """Analisador local deterministico para desenvolvimento e testes."""
 
     SOURCE_PATTERNS = {
+        "contas_pagar": (
+            "contas a pagar",
+            "contas pagar",
+            "contas_pagar",
+            "a pagar",
+        ),
+        "contas_receber": (
+            "contas a receber",
+            "contas receber",
+            "contas_receber",
+            "a receber",
+        ),
         "sap": ("sap", "fs10n", "fbl3n", "zsd008", "zfaturamento"),
         "billing": ("billing", "billings"),
+        "antifraude": ("antifraude", "fraude", "risco"),
         "salesforce": ("salesforce", "sales force"),
         "prefeitura": ("prefeitura", "rps", "nota fiscal"),
     }
+
+    FINANCIAL_TERMS = (
+        "contas",
+        "faturamento",
+        "billing",
+        "financeiro",
+        "fornecedor",
+        "pagamento",
+        "recebimento",
+        "sap",
+    )
 
     RECONCILIATION_TERMS = (
         "compar",
@@ -35,16 +59,58 @@ class MockAIService(AIService):
         "apenas billing",
     )
 
+    CONSOLIDATION_TERMS = (
+        "consolidar",
+        "agrup",
+        "unificar",
+        "consolidado",
+    )
+
+    POWER_BI_TERMS = ("power bi", "dashboard", "dataset")
+
+    ANTIFRAUD_TERMS = ("antifraude", "fraude", "risco")
+
+    VALIDATION_TERMS = ("validar", "validacao", "validacao de dados")
+
     def analyze(self, prompt: str) -> AutomationAnalysis:
         normalized_prompt = prompt.strip()
         prompt_lower = self._normalize(normalized_prompt)
         sources = self._detect_sources(prompt_lower)
         reconciliation = self._is_reconciliation(prompt_lower, sources)
-        project_id = self._project_id(prompt_lower, sources, reconciliation)
-        project_name = self._project_name(sources, reconciliation)
-        category = self._category(sources, reconciliation)
-        inputs = self._inputs(prompt_lower, sources, reconciliation)
-        outputs = self._outputs(sources, reconciliation)
+        consolidation = self._is_consolidation(prompt_lower)
+        power_bi = self._is_power_bi(prompt_lower)
+        pattern = self._pattern(
+            prompt_lower,
+            reconciliation,
+            consolidation,
+            power_bi,
+        )
+        project_id = self._project_id(
+            prompt_lower,
+            sources,
+            reconciliation,
+            consolidation,
+            power_bi,
+        )
+        project_name = self._project_name(
+            sources,
+            reconciliation,
+            consolidation,
+            power_bi,
+        )
+        category = self._category(sources, reconciliation, power_bi, prompt_lower)
+        inputs = self._inputs(
+            prompt_lower,
+            sources,
+            reconciliation,
+            power_bi,
+        )
+        outputs = self._outputs(
+            sources,
+            reconciliation,
+            consolidation,
+            power_bi,
+        )
         description = normalized_prompt.rstrip(".") + "."
 
         manifest_data = ManifestGenerator.build_manifest_data(
@@ -84,6 +150,7 @@ class MockAIService(AIService):
             inputs=inputs,
             outputs=outputs,
             complexity="media" if reconciliation or len(inputs) > 1 else "baixa",
+            pattern=pattern,
             project_id=project_id,
             project_name=project_name,
             category=category,
@@ -112,9 +179,38 @@ class MockAIService(AIService):
         ]
 
     @classmethod
+    def _is_consolidation(cls, prompt: str) -> bool:
+        return any(term in prompt for term in cls.CONSOLIDATION_TERMS)
+
+    @classmethod
+    def _is_power_bi(cls, prompt: str) -> bool:
+        return any(term in prompt for term in cls.POWER_BI_TERMS)
+
+    @classmethod
+    def _pattern(
+        cls,
+        prompt: str,
+        reconciliation: bool,
+        consolidation: bool,
+        power_bi: bool,
+    ) -> str:
+        if reconciliation:
+            return "reconciliation"
+        if consolidation:
+            return "consolidation"
+        if any(term in prompt for term in cls.ANTIFRAUD_TERMS):
+            return "antifraud"
+        if power_bi:
+            return "powerbi"
+        if any(term in prompt for term in cls.VALIDATION_TERMS):
+            return "validation"
+        return "generic"
+
+    @classmethod
     def _is_reconciliation(cls, prompt: str, sources: list[str]) -> bool:
-        return len(sources) >= 2 and any(
-            term in prompt for term in cls.RECONCILIATION_TERMS
+        return (
+            len(sources) >= 2
+            and any(term in prompt for term in cls.RECONCILIATION_TERMS)
         ) or {"sap", "billing"}.issubset(sources)
 
     @staticmethod
@@ -122,11 +218,21 @@ class MockAIService(AIService):
         prompt: str,
         sources: list[str],
         reconciliation: bool,
+        consolidation: bool,
+        power_bi: bool,
     ) -> str:
-        if reconciliation and {"sap", "billing"}.issubset(sources):
+        if power_bi and not reconciliation:
+            base = "dataset_power_bi"
+        elif any(term in prompt for term in MockAIService.ANTIFRAUD_TERMS):
+            base = "antifraude"
+        elif reconciliation and {"contas_pagar", "contas_receber"}.issubset(sources):
+            base = "conciliacao_contas_pagar_receber"
+        elif reconciliation and {"sap", "billing"}.issubset(sources):
             base = "conciliacao_sap_billing"
         elif reconciliation:
             base = "conciliacao_" + "_".join(sources[:2])
+        elif consolidation:
+            base = "consolidacao_" + (sources[0] if sources else "dados")
         elif sources:
             base = sources[0]
         else:
@@ -134,23 +240,58 @@ class MockAIService(AIService):
         return re.sub(r"[^a-z0-9]+", "_", base).strip("_")
 
     @staticmethod
-    def _project_name(sources: list[str], reconciliation: bool) -> str:
+    def _project_name(
+        sources: list[str],
+        reconciliation: bool,
+        consolidation: bool,
+        power_bi: bool,
+    ) -> str:
+        if power_bi and not reconciliation:
+            return "Dataset Power BI"
+        if any(term in " ".join(sources) for term in ("antifraude", "fraude", "risco")):
+            return "Antifraude"
+        if reconciliation and {"contas_pagar", "contas_receber"}.issubset(sources):
+            return "Conciliacao Contas a Pagar x Contas a Receber"
         if reconciliation and {"sap", "billing"}.issubset(sources):
             return "Conciliacao SAP x Billing"
         if reconciliation:
             return "Conciliacao " + " x ".join(source.upper() for source in sources)
+        if consolidation:
+            return "Consolidacao " + (sources[0].replace("_", " ").title() if sources else "Dados")
         return "Automacao " + (sources[0].capitalize() if sources else "Gerada")
 
     @staticmethod
-    def _category(sources: list[str], reconciliation: bool) -> str:
-        if reconciliation or {"sap", "billing"}.intersection(sources):
+    def _category(
+        sources: list[str],
+        reconciliation: bool,
+        power_bi: bool,
+        prompt: str,
+    ) -> str:
+        if power_bi and not reconciliation:
+            return "power_bi"
+        if any(term in prompt for term in MockAIService.ANTIFRAUD_TERMS):
+            return "risco"
+        if reconciliation or any(source in {"sap", "billing", "contas_pagar", "contas_receber"} for source in sources):
+            return "financeiro"
+        if any(term in prompt for term in MockAIService.FINANCIAL_TERMS):
             return "financeiro"
         if "salesforce" in sources:
             return "salesforce"
         return "operacional"
 
     @staticmethod
-    def _outputs(sources: list[str], reconciliation: bool) -> list[str]:
+    def _outputs(
+        sources: list[str],
+        reconciliation: bool,
+        consolidation: bool,
+        power_bi: bool,
+    ) -> list[str]:
+        if power_bi and not reconciliation:
+            return ["dataset.csv"]
+        if any(term in sources for term in ("antifraude", "fraude", "risco")):
+            return ["antifraude.xlsx"]
+        if consolidation and not reconciliation:
+            return ["consolidado.xlsx"]
         if reconciliation and {"sap", "billing"}.issubset(sources):
             return ["conciliacao.xlsx", "divergencias.xlsx"]
         if reconciliation:
@@ -162,10 +303,48 @@ class MockAIService(AIService):
         prompt: str,
         sources: list[str],
         reconciliation: bool,
+        power_bi: bool,
     ) -> list[dict[str, Any]]:
         extension = "xlsx" if any(
             term in prompt for term in ("excel", "xlsx", "relatorio", "fs10n")
         ) else "csv"
+        if power_bi and not reconciliation:
+            return [
+                {
+                    "id": "origem",
+                    "display_name": "Base de origem",
+                    "cli_argument": "--input-file",
+                    "extension": extension,
+                    "required_columns": ["ID"],
+                }
+            ]
+        if any(term in prompt for term in MockAIService.ANTIFRAUD_TERMS):
+            return [
+                {
+                    "id": "base_antifraude",
+                    "display_name": "Base Antifraude",
+                    "cli_argument": "--input-file",
+                    "extension": extension,
+                    "required_columns": ["ID"],
+                }
+            ]
+        if reconciliation and {"contas_pagar", "contas_receber"}.issubset(sources):
+            return [
+                {
+                    "id": "contas_pagar",
+                    "display_name": "Contas a Pagar",
+                    "cli_argument": "--contas-pagar",
+                    "extension": extension,
+                    "required_columns": ["DOCUMENTO"],
+                },
+                {
+                    "id": "contas_receber",
+                    "display_name": "Contas a Receber",
+                    "cli_argument": "--contas-receber",
+                    "extension": extension,
+                    "required_columns": ["DOCUMENTO"],
+                },
+            ]
         if reconciliation and {"sap", "billing"}.issubset(sources):
             return [
                 {

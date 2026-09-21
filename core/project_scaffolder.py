@@ -34,14 +34,17 @@ class ProjectScaffolder:
         return project_folder
 
     @staticmethod
-    def create_automation_project(manifest: Manifest) -> dict[str, Path]:
+    def create_automation_project(
+        manifest: Manifest,
+        pattern: str = "generic",
+    ) -> dict[str, Path]:
         project_folder = ProjectScaffolder.create(manifest)
         entrypoint = project_folder / manifest.entrypoint.script
         manifest_path = project_folder / "manifest.yaml"
         readme_path = project_folder / "README.md"
 
         entrypoint.write_text(
-            TemplateEngine.render_designer_main(manifest),
+            TemplateEngine.render_pattern_main(manifest, pattern),
             encoding="utf-8",
         )
         manifest_path.write_text(

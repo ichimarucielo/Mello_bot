@@ -122,6 +122,8 @@ class AutomationAnalysis(BaseModel):
 
     complexity: str
 
+    pattern: str = "generic"
+
     project_id: str
 
     project_name: str
