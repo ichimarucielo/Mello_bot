@@ -90,4 +90,5 @@ class AICreateProjectResponse(BaseModel):
     manifest_path: str
     readme_path: str
     entrypoint_path: str
+    published_manifest_path: str | None = None
     status: str

@@ -1,17 +1,16 @@
-# Consolidacao Dados
+# Automacao Sap
 
 ## Objetivo
 
-Recebo 15 planilhas de vendas
-e preciso consolidar.
+eu recebo duas bases. A primeira base é um xlsx do mes 7 zsd008 sap, a outra é um xlsx do mes 8 zsd008 sap. Preciso cruzar ambas e ter dados limpos e tratados para que eu descubra o que ainda está aberto, fazendo compensadas - abertas. Eu espero um relatorio de saída apenas, em xlsx para "diferença em aberto".
 
 ## Inputs
 
-- `entrada`: Arquivo de entrada (csv)
+- `sap`: SAP (xlsx)
 
 ## Outputs
 
-- `consolidado.xlsx`
+- `resultado.xlsx`
 
 ## Como executar
 

@@ -1,0 +1,19 @@
+id: dataset_power_bi
+name: Dataset Power BI
+category: power_bi
+description: Preparar um dataset para Power BI 3.
+project_path: projects/dataset_power_bi
+timeout_seconds: 1800
+entrypoint:
+  script: src/main.py
+required_files:
+- id: origem
+  display_name: Base de origem
+  accepted_extensions:
+  - csv
+  required_columns:
+  - ID
+  cli_argument: --input-file
+outputs:
+- dataset.csv
+tags: []

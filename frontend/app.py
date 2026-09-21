@@ -196,12 +196,12 @@ def render_home_page(history: list[dict], projects: dict) -> None:
             if st.button("🚀 Criar automação", type="primary", width="stretch"):
                 if home_prompt.strip():
                     st.session_state["mello_ai_prompt"] = home_prompt
-                    st.session_state["navigation"] = "MELLO AI"
+                    st.session_state["pending_navigation"] = "MELLO AI"
                     st.rerun()
                 st.warning("Descreva o processo para começar.")
         with example_col:
             if st.button("📋 Ver exemplos", width="stretch"):
-                st.session_state["navigation"] = "MELLO AI"
+                st.session_state["pending_navigation"] = "MELLO AI"
                 st.session_state["mello_ai_prompt"] = (
                     "Recebo diariamente um relatório FS10N exportado do SAP e um relatório de Billing. "
                     "Preciso conciliar os documentos e identificar divergências."
@@ -539,11 +539,11 @@ def render_projects_page(projects: dict) -> None:
             action_col, manifest_col = st.columns(2)
             with action_col:
                 if st.button("Executar", key=f"project_run_{project.id}", width="stretch"):
-                    st.session_state["navigation"] = "Executar"
+                    st.session_state["pending_navigation"] = "Execuções"
                     st.rerun()
             with manifest_col:
                 if st.button("Manifesto", key=f"project_manifest_{project.id}", width="stretch"):
-                    st.session_state["navigation"] = "Administração"
+                    st.session_state["pending_navigation"] = "Administração"
                     st.rerun()
 
 
@@ -821,6 +821,10 @@ def render_create_project_page() -> None:
 # =============================================================================
 # SIDEBAR
 # =============================================================================
+
+pending_navigation = st.session_state.pop("pending_navigation", None)
+if pending_navigation is not None:
+    st.session_state["navigation"] = pending_navigation
 
 with st.sidebar:
 

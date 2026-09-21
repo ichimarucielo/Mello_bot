@@ -1,13 +1,16 @@
-# Conciliacao SAP x Billing
+# Conciliacao Contas a Pagar x Contas a Receber
 
 ## Objetivo
 
-Recebo diariamente um relatório FS10N exportado do SAP e um relatório de Billing. Preciso conciliar os documentos e gerar um Excel contendo conciliados, divergentes, apenas SAP e apenas Billing.
+Crie um relatório chamado: "Diferença de pagar e receber"
+Relatorios usados serão 2: zsd008 em formato de excel do mes 07 (julho) e outro sera o zsd008 em formato de excel do mes 08 (agosto)
+Preciso que diferencie notas fiscais compensadas e em abertas por meio de status.
+Gere um relatório chamado diferença receber x a pagar.
 
 ## Inputs
 
-- `sap`: SAP (FS10N) (xlsx)
-- `billing`: Billing (xlsx)
+- `zsd008_mes_07`: ZSD008 Mes 07 (xlsx)
+- `zsd008_mes_08`: ZSD008 Mes 08 (xlsx)
 
 ## Outputs
 

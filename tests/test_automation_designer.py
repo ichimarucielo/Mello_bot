@@ -14,6 +14,7 @@ from api.schemas import AIAnalyzeResponse, AICreateProjectResponse
 from core.ai_service import AIService, MockAIService
 from core.automation_designer import AutomationDesigner
 from core.models import AutomationAnalysis, AutomationRequest, Manifest
+from core.registry import load_projects
 
 
 PROMPT = "Recebo diariamente um relatório FS10N exportado do SAP e um relatório de Billing."
@@ -27,6 +28,67 @@ def test_mock_ai_service_returns_structured_analysis():
     assert analysis.category == "financeiro"
     assert {item["id"] for item in analysis.inputs} == {"sap", "billing"}
     assert analysis.outputs == ["conciliacao.xlsx", "divergencias.xlsx"]
+
+
+def test_sap_report_aliases_use_financial_xlsx_defaults():
+    service = MockAIService()
+
+    for report_name in ("FS10N", "FBL3N", "FBL5N", "ZSD008"):
+        analysis = service.analyze(f"Recebo o relatorio {report_name} do SAP.")
+
+        assert analysis.category == "financeiro"
+        assert analysis.inputs[0]["id"] == "sap"
+        assert analysis.inputs[0]["extension"] == "xlsx"
+        assert analysis.manifest_data["required_files"][0]["accepted_extensions"] == [
+            "xlsx"
+        ]
+
+
+def test_billing_and_prefeitura_remain_distinct_sources():
+    service = MockAIService()
+
+    billing = service.analyze("Recebo um relatorio de Billing.")
+    prefeitura = service.analyze("Recebo um arquivo exportado da Prefeitura.")
+
+    assert billing.inputs[0]["id"] == "billing"
+    assert billing.inputs[0]["extension"] == "xlsx"
+    assert prefeitura.inputs[0]["id"] == "prefeitura"
+    assert prefeitura.inputs[0]["extension"] == "csv"
+
+
+def test_file_entities_separate_zsd008_by_month():
+    analysis = MockAIService().analyze(
+        "Recebo um ZSD008 do mes 7 e outro ZSD008 do mes 8."
+    )
+
+    assert [item["id"] for item in analysis.inputs] == [
+        "zsd008_mes_7",
+        "zsd008_mes_8",
+    ]
+    assert all(item["source"] == "sap" for item in analysis.inputs)
+    assert all(item["extension"] == "xlsx" for item in analysis.inputs)
+
+
+def test_file_entities_separate_fbl5n_by_status():
+    analysis = MockAIService().analyze(
+        "Recebo FBL5N aberta e FBL5N compensada."
+    )
+
+    assert [item["id"] for item in analysis.inputs] == [
+        "fbl5n_aberta",
+        "fbl5n_compensada",
+    ]
+
+
+def test_file_entities_separate_fs10n_by_period():
+    analysis = MockAIService().analyze(
+        "Recebo FS10N atual e FS10N anterior."
+    )
+
+    assert [item["id"] for item in analysis.inputs] == [
+        "fs10n_atual",
+        "fs10n_anterior",
+    ]
 
 
 def test_mock_ai_service_recognizes_accounts_payable_and_receivable():
@@ -130,6 +192,31 @@ def test_designer_creates_project_artifacts_and_executable_main(
     assert process.returncode == 0, process.stderr
     assert (project_path / "data" / "output" / "conciliacao.xlsx").is_file()
     assert (project_path / "data" / "output" / "divergencias.xlsx").is_file()
+
+
+def test_designer_publishes_manifest_and_registry_discovers_project(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setattr("core.project_scaffolder.BASE_DIR", tmp_path)
+    monkeypatch.setattr("core.automation_designer.MANIFESTS_DIR", tmp_path / "manifests")
+    monkeypatch.setattr("core.manifest_loader.MANIFESTS_PATH", tmp_path / "manifests")
+    monkeypatch.setattr("core.registry.MANIFESTS_DIR", tmp_path / "manifests")
+
+    result = AutomationDesigner().create_project(PROMPT)
+    project_manifest = Path(result.manifest_path)
+    published_manifest = tmp_path / "manifests" / "conciliacao_sap_billing.yaml"
+
+    assert project_manifest == (
+        tmp_path / "projects" / "conciliacao_sap_billing" / "manifest.yaml"
+    )
+    assert project_manifest.is_file()
+    assert published_manifest.is_file()
+    assert project_manifest.read_text(encoding="utf-8") == published_manifest.read_text(
+        encoding="utf-8"
+    )
+    assert "conciliacao_sap_billing" in load_projects()
+    assert result.published_manifest_path == str(published_manifest)
 
 
 def test_designer_selects_pattern_templates(tmp_path: Path, monkeypatch):

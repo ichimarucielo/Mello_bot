@@ -152,6 +152,8 @@ class AutomationGenerationResult(BaseModel):
 
     entrypoint_path: str
 
+    published_manifest_path: str | None = None
+
     status: str
 
     analysis: AutomationAnalysis

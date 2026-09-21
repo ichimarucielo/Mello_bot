@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 
-REQUIRED_FILES = [{"id": "sap", "cli_argument": "--sap", "argument_name": "sap"}, {"id": "billing", "cli_argument": "--billing", "argument_name": "billing"}]
+REQUIRED_FILES = [{"id": "zsd008_mes_07", "cli_argument": "--zsd008-mes-07", "argument_name": "zsd008_mes_07"}, {"id": "zsd008_mes_08", "cli_argument": "--zsd008-mes-08", "argument_name": "zsd008_mes_08"}]
 OUTPUTS = ["conciliacao.xlsx", "divergencias.xlsx"]
 OUTPUT_FOLDER = 'data/output'
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -30,7 +30,7 @@ def reconcile(left: pd.DataFrame, right: pd.DataFrame) -> tuple[pd.DataFrame, pd
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Conciliacao SAP x Billing')
+    parser = argparse.ArgumentParser(description='Conciliacao Contas a Pagar x Contas a Receber')
     for required_file in REQUIRED_FILES:
         parser.add_argument(required_file["cli_argument"], required=True)
     args = parser.parse_args()
@@ -48,7 +48,7 @@ def main() -> None:
     }
     for output_name in OUTPUTS:
         output_map.get(output_name, divergencias).to_excel(output_folder / output_name, index=False)
-    logger.info("Conciliacao base concluida: %s", 'conciliacao_sap_billing')
+    logger.info("Conciliacao base concluida: %s", 'conciliacao_contas_pagar_receber')
     # TODO: implementar regras de negocio, chaves e classificacoes especificas.
 
 

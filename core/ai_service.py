@@ -18,6 +18,23 @@ class AIService(ABC):
 class MockAIService(AIService):
     """Analisador local deterministico para desenvolvimento e testes."""
 
+    SAP_REPORT_TERMS = (
+        "fs10n",
+        "fbl3n",
+        "fbl5n",
+        "fbl5n aberta",
+        "fbl5n compensada",
+        "zsd008",
+        "zfaturamento",
+    )
+
+    DOMAIN_EXTENSIONS = {
+        "sap": "xlsx",
+        "billing": "xlsx",
+        "prefeitura": "csv",
+        "antifraude": "xlsx",
+    }
+
     SOURCE_PATTERNS = {
         "contas_pagar": (
             "contas a pagar",
@@ -31,7 +48,7 @@ class MockAIService(AIService):
             "contas_receber",
             "a receber",
         ),
-        "sap": ("sap", "fs10n", "fbl3n", "zsd008", "zfaturamento"),
+        "sap": ("sap",) + SAP_REPORT_TERMS,
         "billing": ("billing", "billings"),
         "antifraude": ("antifraude", "fraude", "risco"),
         "salesforce": ("salesforce", "sales force"),
@@ -75,8 +92,13 @@ class MockAIService(AIService):
     def analyze(self, prompt: str) -> AutomationAnalysis:
         normalized_prompt = prompt.strip()
         prompt_lower = self._normalize(normalized_prompt)
-        sources = self._detect_sources(prompt_lower)
-        reconciliation = self._is_reconciliation(prompt_lower, sources)
+        file_entities = self._detect_file_entities(prompt_lower)
+        sources = self._detect_sources(prompt_lower, file_entities)
+        reconciliation = self._is_reconciliation(
+            prompt_lower,
+            sources,
+            file_entities,
+        )
         consolidation = self._is_consolidation(prompt_lower)
         power_bi = self._is_power_bi(prompt_lower)
         pattern = self._pattern(
@@ -104,6 +126,7 @@ class MockAIService(AIService):
             sources,
             reconciliation,
             power_bi,
+            file_entities,
         )
         outputs = self._outputs(
             sources,
@@ -171,12 +194,142 @@ class MockAIService(AIService):
         )
 
     @classmethod
-    def _detect_sources(cls, prompt: str) -> list[str]:
-        return [
+    def _detect_sources(
+        cls,
+        prompt: str,
+        file_entities: list[dict[str, Any]],
+    ) -> list[str]:
+        detected = [
             source
             for source, patterns in cls.SOURCE_PATTERNS.items()
             if any(pattern in prompt for pattern in patterns)
         ]
+        for entity in file_entities:
+            source = entity["source"]
+            if source not in detected:
+                detected.append(source)
+        return detected
+
+    @classmethod
+    def _detect_file_entities(cls, prompt: str) -> list[dict[str, Any]]:
+        entities: list[dict[str, Any]] = []
+
+        for report in ("zsd008", "fs10n", "fbl3n"):
+            matches = list(re.finditer(rf"\b{report}\b", prompt))
+            for index, match in enumerate(matches):
+                next_start = matches[index + 1].start() if index + 1 < len(matches) else len(prompt)
+                context = prompt[match.end():min(next_start, match.end() + 36)]
+                qualifier = cls._clean_qualifier(context)
+                file_id = f"{report}_{qualifier}" if qualifier else "sap"
+                suffix = f"_{qualifier}" if qualifier else ""
+                entities.append(
+                    cls._file_entity(
+                        file_id=file_id,
+                        display_name=(
+                            f"{report.upper()} {qualifier.replace('_', ' ').title()}"
+                            if qualifier
+                            else "SAP"
+                        ),
+                        source="sap",
+                        report=report,
+                        extension="xlsx",
+                        attributes={"qualifier": qualifier},
+                    )
+                )
+
+        for match in re.finditer(r"\bfbl5n\b", prompt):
+            context = prompt[match.end():match.end() + 24]
+            qualifier = cls._clean_qualifier(context)
+            file_id = f"fbl5n_{qualifier}" if qualifier else "sap"
+            entities.append(
+                cls._file_entity(
+                    file_id=file_id,
+                    display_name=f"FBL5N {qualifier.replace('_', ' ').title()}".strip(),
+                    source="sap",
+                    report="fbl5n",
+                    extension="xlsx",
+                    attributes={"qualifier": qualifier},
+                )
+            )
+
+        if "contas a pagar" in prompt and "contas a receber" in prompt:
+            entities.extend(
+                [
+                    cls._file_entity(
+                        "contas_pagar", "Contas a Pagar", "contas_pagar", "xlsx",
+                        attributes={"context": "contas a pagar"},
+                    ),
+                    cls._file_entity(
+                        "contas_receber", "Contas a Receber", "contas_receber", "xlsx",
+                        attributes={"context": "contas a receber"},
+                    ),
+                ]
+            )
+
+        if "billing" in prompt:
+            entities.append(
+                cls._file_entity(
+                    "billing", "Billing", "billing", "xlsx",
+                    attributes={"context": "billing"},
+                )
+            )
+        if "prefeitura" in prompt:
+            entities.append(
+                cls._file_entity(
+                    "prefeitura", "Prefeitura", "prefeitura", "csv",
+                    attributes={"context": "prefeitura"},
+                )
+            )
+        if not entities and any(term in prompt for term in cls.ANTIFRAUD_TERMS):
+            entities.append(
+                cls._file_entity(
+                    "base_antifraude", "Base Antifraude", "antifraude", "xlsx",
+                    attributes={"context": "antifraude"},
+                )
+            )
+        return cls._deduplicate_entities(entities)
+
+    @staticmethod
+    def _file_entity(
+        file_id: str,
+        display_name: str,
+        source: str,
+        extension: str,
+        report: str | None = None,
+        attributes: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "id": file_id,
+            "display_name": display_name,
+            "source": source,
+            "report": report or source,
+            "extension": extension,
+            "cli_argument": f"--{file_id.replace('_', '-')}",
+            "required_columns": ["DOCUMENTO"],
+            "attributes": attributes or {},
+        }
+
+    @staticmethod
+    def _clean_qualifier(value: str) -> str:
+        value = re.sub(r"\b(?:e|outro|do|de|mes)\b", " ", value)
+        month_match = re.search(r"\b(?:mes\s*)?(\d{1,2})\b", value)
+        if month_match:
+            return f"mes_{month_match.group(1)}"
+        tokens = re.findall(r"[a-z0-9]+", value)
+        for token in ("atual", "anterior", "historico", "aberta", "compensada", "fechada", "pendente"):
+            if token in tokens:
+                return token
+        return ""
+
+    @staticmethod
+    def _deduplicate_entities(entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        unique: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for entity in entities:
+            if entity["id"] not in seen:
+                unique.append(entity)
+                seen.add(entity["id"])
+        return unique
 
     @classmethod
     def _is_consolidation(cls, prompt: str) -> bool:
@@ -207,11 +360,16 @@ class MockAIService(AIService):
         return "generic"
 
     @classmethod
-    def _is_reconciliation(cls, prompt: str, sources: list[str]) -> bool:
+    def _is_reconciliation(
+        cls,
+        prompt: str,
+        sources: list[str],
+        file_entities: list[dict[str, Any]],
+    ) -> bool:
         return (
-            len(sources) >= 2
+            len(file_entities) >= 2
             and any(term in prompt for term in cls.RECONCILIATION_TERMS)
-        ) or {"sap", "billing"}.issubset(sources)
+        ) or {"sap", "billing"}.issubset(sources) or len(file_entities) >= 2
 
     @staticmethod
     def _project_id(
@@ -230,7 +388,7 @@ class MockAIService(AIService):
         elif reconciliation and {"sap", "billing"}.issubset(sources):
             base = "conciliacao_sap_billing"
         elif reconciliation:
-            base = "conciliacao_" + "_".join(sources[:2])
+            base = "conciliacao_" + "_".join(sources[:2] or ["arquivos"])
         elif consolidation:
             base = "consolidacao_" + (sources[0] if sources else "dados")
         elif sources:
@@ -304,10 +462,11 @@ class MockAIService(AIService):
         sources: list[str],
         reconciliation: bool,
         power_bi: bool,
+        file_entities: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        extension = "xlsx" if any(
-            term in prompt for term in ("excel", "xlsx", "relatorio", "fs10n")
-        ) else "csv"
+        if file_entities:
+            return file_entities
+        extension = MockAIService._preferred_extension(prompt, sources)
         if power_bi and not reconciliation:
             return [
                 {
@@ -382,3 +541,14 @@ class MockAIService(AIService):
                 "required_columns": ["ID"],
             }
         ]
+
+    @classmethod
+    def _preferred_extension(cls, prompt: str, sources: list[str]) -> str:
+        if any(term in prompt for term in cls.SAP_REPORT_TERMS):
+            return cls.DOMAIN_EXTENSIONS["sap"]
+        for source in sources:
+            if source in cls.DOMAIN_EXTENSIONS:
+                return cls.DOMAIN_EXTENSIONS[source]
+        if any(term in prompt for term in ("excel", "xlsx", "relatorio")):
+            return "xlsx"
+        return "csv"

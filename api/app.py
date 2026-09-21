@@ -63,6 +63,7 @@ def create_automation_project(request: AutomationRequest):
             "manifest_path",
             "readme_path",
             "entrypoint_path",
+            "published_manifest_path",
             "status",
         }
     )

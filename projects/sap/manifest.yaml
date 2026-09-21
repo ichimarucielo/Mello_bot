@@ -1,0 +1,22 @@
+id: sap
+name: Automacao Sap
+category: financeiro
+description: eu recebo duas bases. A primeira base é um xlsx do mes 7 zsd008 sap,
+  a outra é um xlsx do mes 8 zsd008 sap. Preciso cruzar ambas e ter dados limpos e
+  tratados para que eu descubra o que ainda está aberto, fazendo compensadas - abertas.
+  Eu espero um relatorio de saída apenas, em xlsx para "diferença em aberto".
+project_path: projects/sap
+timeout_seconds: 1800
+entrypoint:
+  script: src/main.py
+required_files:
+- id: sap
+  display_name: SAP
+  accepted_extensions:
+  - xlsx
+  required_columns:
+  - ID
+  cli_argument: --input-file
+outputs:
+- resultado.xlsx
+tags: []
