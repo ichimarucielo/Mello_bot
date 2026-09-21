@@ -36,9 +36,42 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 st.set_page_config(
-    page_title="MELLO BOT",
-    page_icon="🤖",
+    page_title="MELLO BOT · Automation intelligence",
+    page_icon=":material/auto_awesome:",
     layout="wide",
+)
+
+st.markdown(
+    """
+    <style>
+    .stApp { background: radial-gradient(circle at 78% -10%, #123c5c 0, #07131f 34rem); }
+    [data-testid="stSidebar"] { background: #06101a; border-right: 1px solid #17344a; }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #9ab4c8; }
+    .mello-mark { display:flex; align-items:center; gap:.7rem; margin:.4rem 0 2.4rem; }
+    .mello-mark-icon { width:2.25rem; height:2.25rem; display:grid; place-items:center; border-radius:.7rem; background:linear-gradient(135deg,#2f9bff,#49c5b6); color:#04111c; font-weight:800; }
+    .mello-mark-title { color:#f2f8fc; font-weight:750; letter-spacing:.02em; font-size:1.1rem; }
+    .mello-mark-subtitle { color:#6f8da5; font-size:.72rem; }
+    .hero { padding: 3.6rem 0 2.2rem; max-width: 900px; }
+    .eyebrow { color:#63b7ff; text-transform:uppercase; letter-spacing:.16em; font-size:.72rem; font-weight:700; }
+    .hero h1 { font-size:clamp(2.8rem, 7vw, 5.7rem); line-height:.98; margin:.7rem 0 1rem; color:#f5fbff; letter-spacing:-.04em; }
+    .hero p { color:#9ab4c8; font-size:1.15rem; max-width:650px; line-height:1.55; }
+    .section-kicker { color:#6f8da5; text-transform:uppercase; letter-spacing:.12em; font-size:.72rem; font-weight:700; }
+    .metric-card { padding:1.05rem 1.1rem; min-height:112px; border:1px solid #1c3b52; border-radius:12px; background:linear-gradient(145deg,#0d2435,#0a1a28); }
+    .metric-label { color:#7f9bb0; font-size:.78rem; }
+    .metric-value { color:#f5fbff; font-size:1.75rem; font-weight:700; margin-top:.35rem; }
+    .metric-note { color:#55c4ae; font-size:.75rem; margin-top:.35rem; }
+    .step-card { padding:1.1rem; min-height:150px; border:1px solid #1c3b52; border-radius:12px; background:#0a1a28; }
+    .step-number { color:#2f9bff; font-size:.78rem; font-weight:800; }
+    .step-title { color:#eff8ff; font-weight:700; margin:.7rem 0 .35rem; }
+    .step-copy { color:#7894a8; font-size:.86rem; line-height:1.4; }
+    .project-card { padding:1.2rem; border:1px solid #1c3b52; border-radius:12px; background:linear-gradient(145deg,#0d2435,#0a1a28); min-height:190px; }
+    .project-title { color:#f2f8fc; font-size:1.05rem; font-weight:700; }
+    .project-meta { color:#7894a8; font-size:.82rem; margin:.45rem 0 1rem; }
+    .status-dot { color:#55c4ae; }
+    @media (max-width: 700px) { .hero { padding-top:2rem; } .hero h1 { font-size:3rem; } }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 # =============================================================================
@@ -125,12 +158,91 @@ def render_copy_button(content: str) -> None:
     )
 
 
-def render_mello_ai_page() -> None:
-    st.header("🤖 MELLO AI")
-    st.caption(
-        "Descreva um processo em linguagem natural e o MELLO BOT irá analisar, "
-        "gerar o manifesto e criar a estrutura inicial da automação."
+def render_metric_card(label: str, value: str, note: str) -> None:
+    st.markdown(
+        f"""
+        <div class="metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">{value}</div>
+            <div class="metric-note">{note}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+
+
+def render_home_page(history: list[dict], projects: dict) -> None:
+    st.markdown(
+        """
+        <div class="hero">
+            <div class="eyebrow">Automation intelligence platform</div>
+            <h1>Transforme processos em automações.</h1>
+            <p>Descreva um problema em linguagem natural. O MELLO AI estrutura a solução, cria o projeto e deixa sua equipe pronta para publicar.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(border=True):
+        st.markdown("**Comece com uma ideia**")
+        home_prompt = st.text_area(
+            "Descreva o processo",
+            placeholder="Recebo diariamente um relatório FS10N exportado do SAP e um relatório de Billing. Preciso identificar divergências.",
+            height=120,
+            key="home_prompt",
+            label_visibility="collapsed",
+        )
+        action_col, example_col = st.columns([1, 1])
+        with action_col:
+            if st.button("🚀 Criar automação", type="primary", width="stretch"):
+                if home_prompt.strip():
+                    st.session_state["mello_ai_prompt"] = home_prompt
+                    st.session_state["navigation"] = "MELLO AI"
+                    st.rerun()
+                st.warning("Descreva o processo para começar.")
+        with example_col:
+            if st.button("📋 Ver exemplos", width="stretch"):
+                st.session_state["navigation"] = "MELLO AI"
+                st.session_state["mello_ai_prompt"] = (
+                    "Recebo diariamente um relatório FS10N exportado do SAP e um relatório de Billing. "
+                    "Preciso conciliar os documentos e identificar divergências."
+                )
+                st.rerun()
+
+    st.space("large")
+    st.markdown('<div class="section-kicker">Visão executiva</div>', unsafe_allow_html=True)
+    successful = sum(item.get("status") == "success" for item in history)
+    success_rate = f"{round(successful / len(history) * 100)}%" if history else "—"
+    metric_columns = st.columns(4)
+    with metric_columns[0]:
+        render_metric_card("Projetos criados", str(len(projects)), "Catálogo ativo")
+    with metric_columns[1]:
+        render_metric_card("Automações monitoradas", str(len(history)), "Histórico rastreável")
+    with metric_columns[2]:
+        render_metric_card("Taxa de sucesso", success_rate, "Execuções concluídas")
+    with metric_columns[3]:
+        render_metric_card("Outputs entregues", str(sum(len(item.get("outputs", [])) for item in history)), "Artefatos gerados")
+
+    st.space("large")
+    st.markdown('<div class="section-kicker">Como funciona</div>', unsafe_allow_html=True)
+    steps = [
+        ("01", "Descreva o processo", "Conte o que acontece hoje, com suas palavras."),
+        ("02", "MELLO AI analisa", "Entradas, saídas, viabilidade e complexidade."),
+        ("03", "Projeto gerado", "Manifesto, README e ETL base prontos para evoluir."),
+        ("04", "Monitore a automação", "Execuções, outputs e histórico em um só lugar."),
+    ]
+    step_columns = st.columns(4)
+    for column, (number, title, copy) in zip(step_columns, steps):
+        with column:
+            st.markdown(
+                f'<div class="step-card"><div class="step-number">{number}</div><div class="step-title">{title}</div><div class="step-copy">{copy}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+
+def render_mello_ai_page() -> None:
+    st.markdown('<div class="eyebrow">Copilot para automações</div>', unsafe_allow_html=True)
+    st.title("MELLO AI", anchor=False)
+    st.caption("Descreva um processo. Receba uma automação estruturada para revisar, publicar e monitorar.")
 
     examples = {
         "SAP x Billing": (
@@ -406,19 +518,33 @@ def render_history_page(history: list[dict]) -> None:
 
 def render_projects_page(projects: dict) -> None:
     st.header("Projetos")
+    st.markdown('<div class="eyebrow">Governança</div>', unsafe_allow_html=True)
+    st.title("Projetos", anchor=False)
+    st.caption("O catálogo central das automações da sua organização.")
 
     project_columns = st.columns(2)
     for index, project in enumerate(projects.values()):
         with project_columns[index % 2]:
-            with st.container(border=True):
-                st.subheader(f"📦 {project.name}")
-                st.caption(project.category.title())
-                st.write(project.description)
-                st.write(
-                    f"**{len(project.required_files)}** arquivo(s) de entrada"
-                )
-                st.write(f"**{len(project.outputs)}** output(s)")
-                st.caption("Outputs: " + ", ".join(project.outputs))
+            st.markdown(
+                f"""
+                <div class="project-card">
+                    <div class="project-title">{project.name}</div>
+                    <div class="project-meta"><span class="status-dot">●</span> Ativo &nbsp; · &nbsp; {project.category.title()}</div>
+                    <div class="project-meta">{project.description}</div>
+                    <div class="project-meta">{len(project.required_files)} inputs &nbsp; · &nbsp; {len(project.outputs)} outputs</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            action_col, manifest_col = st.columns(2)
+            with action_col:
+                if st.button("Executar", key=f"project_run_{project.id}", width="stretch"):
+                    st.session_state["navigation"] = "Executar"
+                    st.rerun()
+            with manifest_col:
+                if st.button("Manifesto", key=f"project_manifest_{project.id}", width="stretch"):
+                    st.session_state["navigation"] = "Administração"
+                    st.rerun()
 
 
 def render_outputs_page(projects: dict) -> None:
@@ -698,20 +824,31 @@ def render_create_project_page() -> None:
 
 with st.sidebar:
 
-    st.header("MELLO BOT")
+    st.markdown(
+        """
+        <div class="mello-mark">
+            <div class="mello-mark-icon">M</div>
+            <div><div class="mello-mark-title">MELLO BOT</div><div class="mello-mark-subtitle">Automation intelligence</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     navigation = st.radio(
-        "Navegação",
+        "Workspace",
         [
-            "🤖 MELLO AI",
-            "Executar",
-            "Histórico",
+            "Visão geral",
+            "MELLO AI",
             "Projetos",
+            "Execuções",
+            "Histórico",
             "Outputs",
-            "Criar Projeto",
             "Administração",
             "Diagnóstico",
         ],
+        key="navigation",
     )
+    st.markdown("---")
+    st.caption("MELLO BOT · V1")
 
 history = load_history()
 
@@ -719,21 +856,21 @@ history = load_history()
 # MAIN
 # =============================================================================
 
-st.title("🤖 MELLO BOT")
-
 projects = {
     project.id: project
     for project in Orchestrator.list_projects()
 }
 
-render_dashboard(history, len(projects))
+if navigation == "MELLO AI":
+    render_mello_ai_page()
+    st.stop()
+
+if navigation == "Visão geral":
+    render_home_page(history, projects)
+    st.stop()
 
 if navigation == "Histórico":
     render_history_page(history)
-    st.stop()
-
-if navigation == "🤖 MELLO AI":
-    render_mello_ai_page()
     st.stop()
 
 if navigation == "Projetos":
@@ -744,10 +881,6 @@ if navigation == "Outputs":
     render_outputs_page(projects)
     st.stop()
 
-if navigation == "Criar Projeto":
-    render_create_project_page()
-    st.stop()
-
 if navigation == "Administração":
     render_admin_page()
     st.stop()
@@ -755,6 +888,8 @@ if navigation == "Administração":
 if navigation == "Diagnóstico":
     render_health_page()
     st.stop()
+
+# Execuções mantém o fluxo operacional existente abaixo.
 
 selected_project_id = st.selectbox(
     "Selecione um ETL",

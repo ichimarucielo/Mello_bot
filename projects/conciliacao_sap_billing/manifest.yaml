@@ -1,0 +1,29 @@
+id: conciliacao_sap_billing
+name: Conciliacao SAP x Billing
+category: financeiro
+description: Recebo diariamente um relatório FS10N exportado do SAP e um relatório
+  de Billing. Preciso conciliar os documentos e gerar um Excel contendo conciliados,
+  divergentes, apenas SAP e apenas Billing.
+project_path: projects/conciliacao_sap_billing
+timeout_seconds: 1800
+entrypoint:
+  script: src/main.py
+required_files:
+- id: sap
+  display_name: SAP (FS10N)
+  accepted_extensions:
+  - xlsx
+  required_columns:
+  - DOCUMENTO
+  cli_argument: --sap
+- id: billing
+  display_name: Billing
+  accepted_extensions:
+  - xlsx
+  required_columns:
+  - DOCUMENTO
+  cli_argument: --billing
+outputs:
+- conciliacao.xlsx
+- divergencias.xlsx
+tags: []

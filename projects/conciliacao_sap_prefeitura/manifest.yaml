@@ -1,0 +1,21 @@
+id: conciliacao_sap_prefeitura
+name: Conciliacao SAP x PREFEITURA
+category: financeiro
+description: Recebo relatórios do SAP e da Prefeitura. Preciso conciliar notas fiscais
+  e gerar um relatório de divergências.
+project_path: projects/conciliacao_sap_prefeitura
+timeout_seconds: 1800
+entrypoint:
+  script: src/main.py
+required_files:
+- id: sap
+  display_name: SAP
+  accepted_extensions:
+  - xlsx
+  required_columns:
+  - ID
+  cli_argument: --input-file
+outputs:
+- conciliacao.xlsx
+- divergencias.xlsx
+tags: []

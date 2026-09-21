@@ -1,0 +1,21 @@
+id: consolidacao_dados
+name: Consolidacao Dados
+category: operacional
+description: 'Recebo 15 planilhas de vendas
+
+  e preciso consolidar.'
+project_path: projects/consolidacao_dados
+timeout_seconds: 1800
+entrypoint:
+  script: src/main.py
+required_files:
+- id: entrada
+  display_name: Arquivo de entrada
+  accepted_extensions:
+  - csv
+  required_columns:
+  - ID
+  cli_argument: --input-file
+outputs:
+- consolidado.xlsx
+tags: []

@@ -1,0 +1,21 @@
+id: antifraude
+name: Antifraude
+category: risco
+description: 'Preciso validar uma base de transações
+
+  e sinalizar risco.'
+project_path: projects/antifraude
+timeout_seconds: 1800
+entrypoint:
+  script: src/main.py
+required_files:
+- id: base_antifraude
+  display_name: Base Antifraude
+  accepted_extensions:
+  - csv
+  required_columns:
+  - ID
+  cli_argument: --input-file
+outputs:
+- antifraude.xlsx
+tags: []
