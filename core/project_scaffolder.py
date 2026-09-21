@@ -34,6 +34,32 @@ class ProjectScaffolder:
         return project_folder
 
     @staticmethod
+    def create_automation_project(manifest: Manifest) -> dict[str, Path]:
+        project_folder = ProjectScaffolder.create(manifest)
+        entrypoint = project_folder / manifest.entrypoint.script
+        manifest_path = project_folder / "manifest.yaml"
+        readme_path = project_folder / "README.md"
+
+        entrypoint.write_text(
+            TemplateEngine.render_designer_main(manifest),
+            encoding="utf-8",
+        )
+        manifest_path.write_text(
+            TemplateEngine.render_manifest(manifest),
+            encoding="utf-8",
+        )
+        readme_path.write_text(
+            TemplateEngine.render_readme(manifest),
+            encoding="utf-8",
+        )
+        return {
+            "project_path": project_folder,
+            "manifest_path": manifest_path,
+            "readme_path": readme_path,
+            "entrypoint_path": entrypoint,
+        }
+
+    @staticmethod
     def delete(manifest: Manifest) -> Path:
         project_folder = (BASE_DIR / manifest.project_path).resolve()
         base_folder = BASE_DIR.resolve()

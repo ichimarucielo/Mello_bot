@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Any
 
 
 class HealthResponse(BaseModel):
@@ -69,3 +70,24 @@ class ExecutionFilesResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class AIAnalyzeResponse(BaseModel):
+    diagnostic: str
+    viability: str
+    inputs: list[dict[str, Any]]
+    outputs: list[str]
+    complexity: str
+
+
+class AIManifestResponse(BaseModel):
+    manifest: str
+
+
+class AICreateProjectResponse(BaseModel):
+    project_id: str
+    project_path: str
+    manifest_path: str
+    readme_path: str
+    entrypoint_path: str
+    status: str

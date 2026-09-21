@@ -1,9 +1,19 @@
 import json
 
+import yaml
+
 from core.models import Manifest
 
 
 class TemplateEngine:
+
+    @staticmethod
+    def render_manifest(manifest: Manifest) -> str:
+        return yaml.safe_dump(
+            manifest.model_dump(mode="json"),
+            allow_unicode=True,
+            sort_keys=False,
+        )
 
     @staticmethod
     def render_main(manifest: Manifest) -> str:
@@ -56,4 +66,100 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+'''
+
+    @staticmethod
+    def render_designer_main(manifest: Manifest) -> str:
+        arguments = [
+            {
+                "id": required_file.id,
+                "cli_argument": required_file.cli_argument,
+            }
+            for required_file in manifest.required_files
+            if required_file.cli_argument
+        ]
+
+        return f'''import argparse
+import logging
+from pathlib import Path
+
+
+REQUIRED_FILES = {json.dumps(arguments, ensure_ascii=False)}
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description={manifest.name!r})
+    for required_file in REQUIRED_FILES:
+        parser.add_argument(required_file["cli_argument"], required=True)
+    args = parser.parse_args()
+
+    input_paths = {{
+        required_file["id"]: Path(getattr(
+            args,
+            required_file["cli_argument"].lstrip("-").replace("-", "_"),
+        ))
+        for required_file in REQUIRED_FILES
+    }}
+    for file_id, input_path in input_paths.items():
+        if not input_path.is_file():
+            raise FileNotFoundError(f"Input {{file_id}} nao encontrado: {{input_path}}")
+        logger.info("Input recebido: %s", input_path)
+
+    # TODO: implementar a regra de negocio da automacao.
+    # TODO: gerar os outputs declarados no manifesto.
+    logger.info("Scaffold pronto para implementacao: %s", {manifest.id!r})
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+    @staticmethod
+    def render_readme(manifest: Manifest) -> str:
+        inputs = "\n".join(
+            f"- `{item.id}`: {item.display_name} ({', '.join(item.accepted_extensions)})"
+            for item in manifest.required_files
+        )
+        outputs = "\n".join(f"- `{output}`" for output in manifest.outputs)
+        return f'''# {manifest.name}
+
+## Objetivo
+
+{manifest.description}
+
+## Inputs
+
+{inputs}
+
+## Outputs
+
+{outputs}
+
+## Como executar
+
+```bash
+python {manifest.entrypoint.script} --help
+```
+
+Preencha os argumentos definidos no manifesto e execute o comando a partir da raiz deste projeto.
+
+## Estrutura
+
+```text
+{manifest.entrypoint.script}
+data/input/
+data/output/
+manifest.yaml
+```
+
+## Criterios de aceite
+
+- os inputs devem ser validados conforme as colunas declaradas;
+- a regra de negocio deve ser implementada no entrypoint;
+- todos os outputs declarados devem ser gerados na pasta configurada;
+- a execucao deve retornar codigo zero em caso de sucesso;
+- o resultado deve ser revisado com dados reais antes de producao.
 '''

@@ -43,6 +43,10 @@ def _emit(event: str, **payload: Any) -> None:
     logger.info(json.dumps(record, ensure_ascii=False, default=str))
 
 
+def log_automation_event(event: str, **payload: Any) -> None:
+    _emit(event, **payload)
+
+
 def log_execution_start(
     *,
     execution_id: str | None,

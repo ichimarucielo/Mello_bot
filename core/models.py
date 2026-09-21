@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import (
     BaseModel,
@@ -104,6 +105,54 @@ class RunProjectResult(BaseModel):
     mapped_files: list[str]
 
     outputs: list[str]
+
+
+class AutomationRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+
+
+class AutomationAnalysis(BaseModel):
+    diagnostic: str
+
+    viability: str
+
+    inputs: list[dict[str, Any]] = Field(default_factory=list)
+
+    outputs: list[str] = Field(default_factory=list)
+
+    complexity: str
+
+    project_id: str
+
+    project_name: str
+
+    category: str
+
+    description: str
+
+    project_path: str
+
+    entrypoint: str
+
+    timeout_seconds: int = Field(default=1800, ge=1)
+
+    manifest_data: dict = Field(default_factory=dict)
+
+
+class AutomationGenerationResult(BaseModel):
+    project_id: str
+
+    project_path: str
+
+    manifest_path: str
+
+    readme_path: str
+
+    entrypoint_path: str
+
+    status: str
+
+    analysis: AutomationAnalysis
 
 class HistoryEntry(BaseModel):
     execution_id: str

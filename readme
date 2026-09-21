@@ -545,3 +545,68 @@ Em outras palavras: o projeto central é o motor de governança e execução; os
   ## Licença
 
   Nenhuma licença foi definida neste repositório até o momento.
+
+  ## Automation Designer
+
+  O Automation Designer adiciona uma camada de criacao assistida por IA sem
+  alterar o fluxo existente de execucao. Ele recebe um requisito em linguagem
+  natural, produz uma analise estruturada, gera um manifesto validado e pode
+  criar um scaffold de projeto usando `ManifestGenerator`, `ProjectScaffolder` e
+  `TemplateEngine`.
+
+  ### Fluxo
+
+  ```text
+  Prompt
+    |
+    v
+  AutomationDesigner
+    |
+    v
+  AIService -> AutomationAnalysis
+    |
+    v
+  ManifestGenerator -> Manifest
+    |
+    v
+  ProjectScaffolder -> README.md + manifest.yaml + src/main.py
+  ```
+
+  O provedor atual e `MockAIService`, um analisador local deterministico para
+  desenvolvimento e testes. A abstracao `AIService` permite adicionar Azure
+  OpenAI, OpenAI, Copilot Studio ou outro provedor sem acoplar o Designer a um
+  fornecedor especifico. Nenhuma dependencia externa de IA e instalada por esta
+  camada.
+
+  ### Endpoints de IA
+
+  | Metodo | Rota | Finalidade |
+  | --- | --- | --- |
+  | POST | `/ai/analyze` | Retorna diagnostico, viabilidade, inputs, outputs e complexidade. |
+  | POST | `/ai/manifest` | Retorna o manifesto YAML validado. |
+  | POST | `/ai/create-project` | Cria o scaffold e retorna os artefatos gerados. |
+
+  Exemplo:
+
+  ```json
+  {
+    "prompt": "Recebo um Excel de faturamento e preciso comparar com SAP para encontrar divergencias."
+  }
+  ```
+
+  O scaffold gerado contem um `README.md` com objetivo, inputs, outputs, forma
+  de execucao, estrutura e criterios de aceite. O `main.py` gerado usa
+  `argparse`, logging, valida a existencia dos arquivos recebidos e deixa TODOs
+  explicitos para a regra de negocio. Ele nao inventa transformacoes.
+
+  O resultado do Designer deve ser tratado como um ponto de partida: colunas,
+  argumentos CLI, caminhos, outputs e regras do ETL precisam ser confirmados
+  antes de uma execucao de producao.
+
+  ### Compatibilidade e migracao
+
+  Os metodos existentes continuam sendo usados da mesma forma. A criacao
+  assistida utiliza apenas `ProjectScaffolder.create_automation_project`; o
+  metodo `ProjectScaffolder.create` e o `TemplateEngine.render_main` existentes
+  permanecem retrocompativeis. O fluxo atual de upload, validacao, execucao,
+  historico e outputs nao depende do Automation Designer.

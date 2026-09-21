@@ -7,6 +7,9 @@ from api.schemas import (
     HealthDetailResponse,
     HealthResponse,
     HistoryResponse,
+    AIAnalyzeResponse,
+    AIManifestResponse,
+    AICreateProjectResponse,
     OutputResponse,
     ProjectResponse,
     RunResponse,
@@ -18,13 +21,51 @@ from fastapi import UploadFile
 from typing import Annotated
 from fastapi.responses import FileResponse
 from core.history_service import HistoryService
+from core.health_service import HealthService
 from core.exceptions import ProjectNotFoundError
 from core.execution_service import ExecutionService, StagedUpload
+from core.automation_designer import AutomationDesigner
+from core.models import AutomationRequest
 
 app = FastAPI(
     title="MELLO BOT API",
     version="1.0.0",
 )
+
+
+@app.post(
+    "/ai/analyze",
+    response_model=AIAnalyzeResponse,
+)
+def analyze_automation(request: AutomationRequest):
+    return AutomationDesigner().analyze(request.prompt)
+
+
+@app.post(
+    "/ai/manifest",
+    response_model=AIManifestResponse,
+)
+def generate_automation_manifest(request: AutomationRequest):
+    return {"manifest": AutomationDesigner().generate_manifest(request.prompt)}
+
+
+@app.post(
+    "/ai/create-project",
+    response_model=AICreateProjectResponse,
+    status_code=201,
+)
+def create_automation_project(request: AutomationRequest):
+    result = AutomationDesigner().create_project(request.prompt)
+    return result.model_dump(
+        include={
+            "project_id",
+            "project_path",
+            "manifest_path",
+            "readme_path",
+            "entrypoint_path",
+            "status",
+        }
+    )
 
 
 @app.post(
