@@ -78,6 +78,13 @@ class AIAnalyzeResponse(BaseModel):
     inputs: list[dict[str, Any]]
     outputs: list[str]
     complexity: str
+    project_id: str | None = None
+    project_name: str | None = None
+    category: str | None = None
+    pattern: str | None = None
+    steps: list[dict[str, Any]] = []
+    manifest_data: dict[str, Any] = {}
+    understanding: dict[str, Any] = {}
 
 
 class AIManifestResponse(BaseModel):
@@ -92,3 +99,8 @@ class AICreateProjectResponse(BaseModel):
     entrypoint_path: str
     published_manifest_path: str | None = None
     status: str
+
+
+class AICreateProjectRequest(BaseModel):
+    prompt: str
+    manifest_data: dict[str, Any] | None = None

@@ -82,6 +82,7 @@ class ManifestGenerator:
         extension: str,
         required_columns: list[str],
         outputs: list[str],
+        steps: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return {
             "id": project_id,
@@ -97,9 +98,11 @@ class ManifestGenerator:
                     "display_name": display_name,
                     "cli_argument": "--input-file",
                     "accepted_extensions": [extension],
+                    "critical_columns": [],
                     "required_columns": required_columns,
                 }
             ],
+            "steps": steps or [],
             "outputs": outputs,
             "tags": [],
         }

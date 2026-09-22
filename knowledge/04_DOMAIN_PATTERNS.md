@@ -217,15 +217,15 @@ Ao identificar FS10N, FBL3N, FBL5N ou ZSD008, gerar no minimo:
 ```yaml
 category: financeiro
 required_files:
-  - id: sap
-    display_name: SAP
+  - id: fs10n
+    display_name: FS10N
     accepted_extensions:
       - xlsx
 ```
 
 Complete `required_columns` somente com colunas observadas ou confirmadas. Nao invente chaves de conciliacao.
 
-Ao identificar SAP e Billing no mesmo prompt, use dois itens em `required_files`, com `id: sap` e `id: billing`. Ao identificar SAP e Prefeitura, mantenha `id: sap` e `id: prefeitura` separados.
+Ao identificar FS10N e Billing no mesmo prompt, use dois itens em `required_files`, com `id: fs10n` e `id: billing`. Ao identificar FS10N e Prefeitura, mantenha `id: fs10n` e `id: prefeitura_nfse` separados.
 
 ## Resultado esperado
 

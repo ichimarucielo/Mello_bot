@@ -11,9 +11,10 @@ required_files:
   display_name: Arquivo de entrada
   accepted_extensions:
   - csv
-  required_columns:
-  - ID
+  critical_columns: []
+  required_columns: []
   cli_argument: --input-file
+steps: []
 outputs:
 - consolidado.xlsx
 tags: []

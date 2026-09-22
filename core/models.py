@@ -21,6 +21,8 @@ class RequiredFile(BaseModel):
 
     accepted_extensions: list[str]
 
+    critical_columns: list[str] = Field(default_factory=list)
+
     required_columns: list[str]
 
     cli_argument: str | None = None
@@ -51,6 +53,8 @@ class Manifest(BaseModel):
     entrypoint: EntryPoint
 
     required_files: list[RequiredFile]
+
+    steps: list[dict[str, Any]] = Field(default_factory=list)
 
     outputs: list[str]
 
@@ -120,6 +124,8 @@ class AutomationAnalysis(BaseModel):
 
     outputs: list[str] = Field(default_factory=list)
 
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+
     complexity: str
 
     pattern: str = "generic"
@@ -139,6 +145,8 @@ class AutomationAnalysis(BaseModel):
     timeout_seconds: int = Field(default=1800, ge=1)
 
     manifest_data: dict = Field(default_factory=dict)
+
+    understanding: dict[str, Any] = Field(default_factory=dict)
 
 
 class AutomationGenerationResult(BaseModel):

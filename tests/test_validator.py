@@ -42,6 +42,29 @@ def test_validate_xlsx_reports_missing_columns(tmp_path: Path):
     assert result["missing_columns"] == ["Total Amount Due"]
 
 
+def test_validate_file_reports_critical_columns_and_confidence(tmp_path: Path):
+    file_path = tmp_path / "fbl5n.xlsx"
+    pd.DataFrame(columns=["Conta", "Nº documento"]).to_excel(
+        file_path,
+        index=False,
+    )
+
+    result = Validator.validate_file(
+        file_path=file_path,
+        file_definition=RequiredFile(
+            id="fbl5n_compensada",
+            display_name="FBL5N Compensada",
+            accepted_extensions=["xlsx"],
+            critical_columns=["Conta", "Nº documento", "Valor Aging"],
+            required_columns=["Conta", "Nº documento"],
+        ),
+    )
+
+    assert result["confidence_score"] == 66
+    assert result["critical_columns_valid"] is False
+    assert result["missing_critical_columns"] == ["Valor Aging"]
+
+
 def test_validate_rejects_unsupported_extension(tmp_path: Path):
     file_path = tmp_path / "input.txt"
     file_path.write_text("column\nvalue\n", encoding="utf-8")

@@ -24,20 +24,26 @@ def test_mock_ai_service_returns_structured_analysis():
     analysis = MockAIService().analyze(PROMPT)
 
     assert isinstance(analysis, AutomationAnalysis)
-    assert analysis.project_id == "conciliacao_sap_billing"
+    assert analysis.project_id == "conciliacao_fs10n_billing"
     assert analysis.category == "financeiro"
-    assert {item["id"] for item in analysis.inputs} == {"sap", "billing"}
+    assert {item["id"] for item in analysis.inputs} == {"fs10n", "billing"}
     assert analysis.outputs == ["conciliacao.xlsx", "divergencias.xlsx"]
 
 
 def test_sap_report_aliases_use_financial_xlsx_defaults():
     service = MockAIService()
 
-    for report_name in ("FS10N", "FBL3N", "FBL5N", "ZSD008"):
+    expected_ids = {
+        "FS10N": "fs10n",
+        "FBL3N": "fbl3n",
+        "FBL5N": "fbl5n_aberta",
+        "ZSD008": "zsd008",
+    }
+    for report_name in expected_ids:
         analysis = service.analyze(f"Recebo o relatorio {report_name} do SAP.")
 
         assert analysis.category == "financeiro"
-        assert analysis.inputs[0]["id"] == "sap"
+        assert analysis.inputs[0]["id"] == expected_ids[report_name]
         assert analysis.inputs[0]["extension"] == "xlsx"
         assert analysis.manifest_data["required_files"][0]["accepted_extensions"] == [
             "xlsx"
@@ -52,7 +58,7 @@ def test_billing_and_prefeitura_remain_distinct_sources():
 
     assert billing.inputs[0]["id"] == "billing"
     assert billing.inputs[0]["extension"] == "xlsx"
-    assert prefeitura.inputs[0]["id"] == "prefeitura"
+    assert prefeitura.inputs[0]["id"] == "prefeitura_nfse"
     assert prefeitura.inputs[0]["extension"] == "csv"
 
 
@@ -150,9 +156,9 @@ def test_designer_generates_valid_manifest(tmp_path: Path, monkeypatch):
     manifest = yaml.safe_load(designer.generate_manifest(PROMPT))
 
     validated = Manifest.model_validate(manifest)
-    assert validated.id == "conciliacao_sap_billing"
+    assert validated.id == "conciliacao_fs10n_billing"
     assert len(validated.required_files) == 2
-    assert [item.id for item in validated.required_files] == ["sap", "billing"]
+    assert [item.id for item in validated.required_files] == ["fs10n", "billing"]
     assert validated.outputs == ["conciliacao.xlsx", "divergencias.xlsx"]
 
 
@@ -174,7 +180,7 @@ def test_designer_creates_project_artifacts_and_executable_main(
         [
             sys.executable,
             result.entrypoint_path,
-            "--sap",
+            "--fs10n",
             str(input_one),
             "--billing",
             str(input_two),
@@ -205,17 +211,17 @@ def test_designer_publishes_manifest_and_registry_discovers_project(
 
     result = AutomationDesigner().create_project(PROMPT)
     project_manifest = Path(result.manifest_path)
-    published_manifest = tmp_path / "manifests" / "conciliacao_sap_billing.yaml"
+    published_manifest = tmp_path / "manifests" / "conciliacao_fs10n_billing.yaml"
 
     assert project_manifest == (
-        tmp_path / "projects" / "conciliacao_sap_billing" / "manifest.yaml"
+        tmp_path / "projects" / "conciliacao_fs10n_billing" / "manifest.yaml"
     )
     assert project_manifest.is_file()
     assert published_manifest.is_file()
     assert project_manifest.read_text(encoding="utf-8") == published_manifest.read_text(
         encoding="utf-8"
     )
-    assert "conciliacao_sap_billing" in load_projects()
+    assert "conciliacao_fs10n_billing" in load_projects()
     assert result.published_manifest_path == str(published_manifest)
 
 

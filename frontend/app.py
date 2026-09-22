@@ -102,10 +102,14 @@ def load_history() -> list[dict]:
 AI_API_URL = os.getenv("MELLO_BOT_API_URL", "http://localhost:8000")
 
 
-def call_ai_api(endpoint: str, prompt: str) -> dict:
+def call_ai_api(
+    endpoint: str,
+    prompt: str,
+    payload: dict | None = None,
+) -> dict:
     request = Request(
         f"{AI_API_URL.rstrip('/')}{endpoint}",
-        data=json.dumps({"prompt": prompt}).encode("utf-8"),
+        data=json.dumps(payload or {"prompt": prompt}).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -288,17 +292,19 @@ def render_mello_ai_page() -> None:
         analyze_clicked = st.button(
             "🔍 Analisar Processo",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
     with manifest_col:
         manifest_clicked = st.button(
             "📄 Gerar Manifesto",
-            use_container_width=True,
+            disabled=not bool(st.session_state.get("mello_ai_analysis")),
+            width="stretch",
         )
     with project_col:
         project_clicked = st.button(
-            "🚀 Criar Projeto",
-            use_container_width=True,
+            "🚀 Aprovar e gerar projeto",
+            disabled=not bool(st.session_state.get("mello_ai_approved")),
+            width="stretch",
         )
 
     if analyze_clicked:
@@ -307,6 +313,12 @@ def render_mello_ai_page() -> None:
             st.session_state["mello_ai_analysis"] = call_ai_api(
                 "/ai/analyze", prompt
             )
+            st.session_state["mello_ai_manifest_data"] = st.session_state[
+                "mello_ai_analysis"
+            ].get("manifest_data", {})
+            st.session_state["mello_ai_approved"] = False
+            st.session_state.pop("mello_ai_project", None)
+            st.session_state.pop("mello_ai_manifest", None)
             st.success("Processo analisado com sucesso.")
         except RuntimeError as error:
             st.error(str(error))
@@ -323,7 +335,16 @@ def render_mello_ai_page() -> None:
     if project_clicked:
         log_automation_event("ai_project_creation_requested")
         try:
-            response = call_ai_api("/ai/create-project", prompt)
+            response = call_ai_api(
+                "/ai/create-project",
+                prompt,
+                payload={
+                    "prompt": prompt,
+                    "manifest_data": st.session_state.get(
+                        "mello_ai_manifest_data"
+                    ),
+                },
+            )
             st.session_state["mello_ai_project"] = response
             st.success("✅ Projeto criado com sucesso")
         except RuntimeError as error:
@@ -332,7 +353,31 @@ def render_mello_ai_page() -> None:
     analysis = st.session_state.get("mello_ai_analysis")
     if analysis:
         st.divider()
-        st.subheader("Análise do processo")
+        st.subheader("Revisão do rascunho")
+        st.caption(
+            "Confira os documentos, colunas críticas e outputs antes de aprovar a geração."
+        )
+        project_review_col, category_review_col = st.columns(2)
+        project_review_col.write(
+            f"**Projeto sugerido**\n\n`{analysis.get('project_id', '-')}`"
+        )
+        category_review_col.write(
+            f"**Nome**\n\n{analysis.get('project_name', '-')} · "
+            f"{analysis.get('category', '-')}"
+        )
+        understanding = analysis.get("understanding", {})
+        st.info(
+            f"Entendimento: {understanding.get('document_count', len(analysis.get('inputs', [])))} documentos · "
+            f"{understanding.get('operation_count', len(analysis.get('steps', [])))} operações · "
+            f"{understanding.get('output_count', len(analysis.get('outputs', [])))} outputs"
+        )
+        manifest_data = st.session_state.get("mello_ai_manifest_data", {})
+        edited_project_name = st.text_input(
+            "Nome do projeto",
+            value=manifest_data.get("name", analysis.get("project_name", "")),
+            key="mello_ai_project_name_editor",
+        )
+        manifest_data["name"] = edited_project_name
         diagnostic_col, viability_col, complexity_col = st.columns(3)
         diagnostic_col.info(analysis.get("diagnostic", "Sem diagnóstico."))
         viability_col.success(analysis.get("viability", "Viabilidade não informada."))
@@ -347,10 +392,53 @@ def render_mello_ai_page() -> None:
                     f"- `{item.get('id', '-')}`: {item.get('display_name', '-') } "
                     f"({', '.join(item.get('accepted_extensions', [item.get('extension', '-')]))})"
                 )
+                critical_columns = item.get("critical_columns", [])
+                if critical_columns:
+                    st.caption(
+                        f"Colunas críticas: {', '.join(critical_columns)}"
+                    )
         with output_col:
-            st.write("**Outputs esperados**")
-            for output in analysis.get("outputs", []):
-                st.write(f"- `{output}`")
+            st.write("**Outputs editáveis**")
+            edited_outputs = st.data_editor(
+                [{"output": output} for output in manifest_data.get(
+                    "outputs", analysis.get("outputs", [])
+                )],
+                num_rows="dynamic",
+                width="stretch",
+                hide_index=True,
+                key="mello_ai_outputs_editor",
+            )
+            output_rows = (
+                edited_outputs.to_dict(orient="records")
+                if hasattr(edited_outputs, "to_dict")
+                else edited_outputs
+            )
+            manifest_data["outputs"] = [
+                row["output"]
+                for row in output_rows
+                if row.get("output")
+            ]
+        st.write("**Pipeline draft**")
+        edited_steps = st.data_editor(
+            manifest_data.get("steps", analysis.get("steps", [])),
+            num_rows="dynamic",
+            width="stretch",
+            hide_index=True,
+            key="mello_ai_steps_editor",
+        )
+        manifest_data["steps"] = (
+            edited_steps.to_dict(orient="records")
+            if hasattr(edited_steps, "to_dict")
+            else edited_steps
+        )
+        st.session_state["mello_ai_manifest_data"] = manifest_data
+        st.divider()
+        approved = st.checkbox(
+            "Aprovo este rascunho para gerar o projeto",
+            key="mello_ai_approved",
+        )
+        if approved:
+            st.success("Rascunho aprovado. A geração do projeto está liberada.")
 
     manifest = st.session_state.get("mello_ai_manifest")
     if manifest:

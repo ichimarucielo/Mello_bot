@@ -10,6 +10,7 @@ from api.schemas import (
     AIAnalyzeResponse,
     AIManifestResponse,
     AICreateProjectResponse,
+    AICreateProjectRequest,
     OutputResponse,
     ProjectResponse,
     RunResponse,
@@ -54,8 +55,14 @@ def generate_automation_manifest(request: AutomationRequest):
     response_model=AICreateProjectResponse,
     status_code=201,
 )
-def create_automation_project(request: AutomationRequest):
-    result = AutomationDesigner().create_project(request.prompt)
+def create_automation_project(request: AICreateProjectRequest):
+    designer = AutomationDesigner()
+    manifest_data = getattr(request, "manifest_data", None)
+    result = (
+        designer.create_project_from_manifest(manifest_data)
+        if manifest_data
+        else designer.create_project(request.prompt)
+    )
     return result.model_dump(
         include={
             "project_id",

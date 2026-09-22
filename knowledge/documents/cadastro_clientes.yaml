@@ -1,0 +1,16 @@
+id: cadastro_clientes
+
+name: Cadastro de Clientes
+
+aliases:
+  - relatório de clientes
+  - relatorio de clientes
+  - cadastro de clientes
+
+accepted_extensions:
+  - xlsx
+  - csv
+
+required_columns: []
+
+category: comercial

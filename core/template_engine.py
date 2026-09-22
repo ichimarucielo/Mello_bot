@@ -39,6 +39,7 @@ class TemplateEngine:
             "{{ OUTPUT_FOLDER }}": repr(getattr(manifest, "output_folder", "data/output")),
             "{{ PROJECT_NAME }}": repr(manifest.name),
             "{{ PROJECT_ID }}": repr(manifest.id),
+            "{{ STEPS }}": json.dumps(manifest.steps, ensure_ascii=False),
         }
         for placeholder, value in replacements.items():
             template = template.replace(placeholder, value)

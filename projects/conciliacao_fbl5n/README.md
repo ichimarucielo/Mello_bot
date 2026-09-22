@@ -1,16 +1,13 @@
-# Conciliacao Contas a Pagar x Contas a Receber
+# Conciliacao FBL5N
 
 ## Objetivo
 
-Crie um relatório chamado: "Diferença de pagar e receber"
-Relatorios usados serão 2: zsd008 em formato de excel do mes 07 (julho) e outro sera o zsd008 em formato de excel do mes 08 (agosto)
-Preciso que diferencie notas fiscais compensadas e em abertas por meio de status.
-Gere um relatório chamado diferença receber x a pagar.
+FBL5N Aberta + FBL5N Compensada.
 
 ## Inputs
 
-- `zsd008_mes_07`: ZSD008 Mes 07 (xlsx)
-- `zsd008_mes_08`: ZSD008 Mes 08 (xlsx)
+- `fbl5n_aberta`: FBL5N Em Aberto (xlsx)
+- `fbl5n_compensada`: FBL5N Compensada (xlsx)
 
 ## Outputs
 

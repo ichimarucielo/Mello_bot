@@ -1,0 +1,16 @@
+id: billing
+
+name: Billing
+
+source: billing
+
+aliases:
+  - billing
+  - billings
+
+accepted_extensions:
+  - xlsx
+
+required_columns: []
+
+category: financeiro

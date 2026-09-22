@@ -11,14 +11,19 @@ required_files:
   display_name: Contas a Pagar
   accepted_extensions:
   - xlsx
+  critical_columns: []
   required_columns: []
   cli_argument: --contas-pagar
 - id: contas_receber
   display_name: Contas a Receber
   accepted_extensions:
   - xlsx
+  critical_columns: []
   required_columns: []
   cli_argument: --contas-receber
+steps:
+- type: normalize
+- type: reconcile
 outputs:
 - conciliacao.xlsx
 - divergencias.xlsx

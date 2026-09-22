@@ -120,9 +120,28 @@ class Validator:
             file_path=file_path,
             required_columns=file_definition.required_columns
         )
+        critical_result = (
+            cls.validate_columns(
+                file_path=file_path,
+                required_columns=file_definition.critical_columns,
+            )
+            if file_definition.critical_columns
+            else {
+                "valid": True,
+                "score": 100,
+                "missing_columns": [],
+            }
+        )
 
         return {
             "file_id": file_definition.id,
             "display_name": file_definition.display_name,
+            "confidence_score": min(
+                validation_result["score"],
+                critical_result["score"],
+            ),
+            "critical_columns": file_definition.critical_columns,
+            "missing_critical_columns": critical_result["missing_columns"],
+            "critical_columns_valid": critical_result["valid"],
             **validation_result
         }

@@ -1,0 +1,15 @@
+id: vendas
+
+name: Relatório de Vendas
+
+aliases:
+  - relatório de vendas
+  - relatorio de vendas
+
+accepted_extensions:
+  - xlsx
+  - csv
+
+required_columns: []
+
+category: comercial

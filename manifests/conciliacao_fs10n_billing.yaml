@@ -1,17 +1,21 @@
-id: conciliacao_sap_billing
-name: Conciliacao SAP x Billing
+id: conciliacao_fs10n_billing
+name: Conciliacao FS10N x BILLING
 category: financeiro
 description: Recebo diariamente um relatório FS10N exportado do SAP e um relatório
   de Billing.
-project_path: projects/conciliacao_sap_billing
+project_path: projects/conciliacao_fs10n_billing
 timeout_seconds: 1800
 entrypoint:
   script: src/main.py
 required_files:
-- id: sap
-  display_name: SAP
+- id: fs10n
+  display_name: FS10N
   accepted_extensions:
   - xlsx
+  critical_columns:
+  - Conta
+  - Nº documento
+  - Montante em moeda interna
   required_columns:
   - Conta
   - Data do documento
@@ -21,13 +25,17 @@ required_files:
   - Tipo de documento
   - Nº documento
   - Montante em moeda interna
-  cli_argument: --sap
+  cli_argument: --fs10n
 - id: billing
   display_name: Billing
   accepted_extensions:
   - xlsx
+  critical_columns: []
   required_columns: []
   cli_argument: --billing
+steps:
+- type: normalize
+- type: reconcile
 outputs:
 - conciliacao.xlsx
 - divergencias.xlsx

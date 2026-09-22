@@ -11,8 +11,10 @@ required_files:
   display_name: Base Antifraude
   accepted_extensions:
   - xlsx
+  critical_columns: []
   required_columns: []
   cli_argument: --base-antifraude
+steps: []
 outputs:
-- antifraude.xlsx
+- resultado.xlsx
 tags: []

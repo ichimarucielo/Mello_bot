@@ -122,8 +122,8 @@ Os exemplos abaixo sao manifestos completos. Use-os como referencia de estrutura
 Use para comparar duas ou mais bases e produzir divergencias.
 
 ```yaml
-id: conciliacao_sap_billing
-name: Conciliacao SAP x Billing
+id: conciliacao_fs10n_billing
+name: Conciliacao FS10N x Billing
 category: financeiro
 description: Comparacao entre SAP e Billing para identificar divergencias.
 project_path: ../ETL_CONCILIACAO
@@ -131,9 +131,9 @@ timeout_seconds: 1800
 entrypoint:
   script: src/main.py
 required_files:
-  - id: sap
-    display_name: SAP
-    cli_argument: "--sap"
+  - id: fs10n
+    display_name: FS10N
+    cli_argument: "--fs10n"
     accepted_extensions: [csv, xlsx]
     required_columns: [DOCUMENTO]
   - id: billing

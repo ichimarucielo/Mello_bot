@@ -1,17 +1,16 @@
-# Conciliacao SAP x PREFEITURA
+# Dataset Power BI
 
 ## Objetivo
 
-Recebo relatórios do SAP e da Prefeitura. Preciso conciliar notas fiscais e gerar um relatório de divergências.
+Quero preparar uma base para Power BI.
 
 ## Inputs
 
-- `sap`: SAP (xlsx)
+- `origem`: Base de origem (csv)
 
 ## Outputs
 
-- `conciliacao.xlsx`
-- `divergencias.xlsx`
+- `dataset.csv`
 
 ## Como executar
 

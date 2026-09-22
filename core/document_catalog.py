@@ -1,5 +1,8 @@
 from pathlib import Path
+from typing import Any
 import yaml
+
+from core.document_engine import DocumentDefinition, DocumentMatcher
 
 
 class DocumentCatalog:
@@ -9,7 +12,12 @@ class DocumentCatalog:
         path: str = "knowledge/documents",
     ):
         self.path = Path(path)
-        self.documents = self._load()
+        self.documents: dict[str, dict[str, Any]] = self._load()
+        self.definitions = {
+            document_id: DocumentDefinition.from_mapping(document)
+            for document_id, document in self.documents.items()
+        }
+        self.matcher = DocumentMatcher(list(self.definitions.values()))
 
     def _load(self) -> dict:
         documents = {}
@@ -50,3 +58,6 @@ class DocumentCatalog:
                 return document
 
         return None
+
+    def match(self, text: str) -> list[DocumentDefinition]:
+        return self.matcher.match(text)

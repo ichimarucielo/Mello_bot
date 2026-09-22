@@ -41,10 +41,23 @@ class AutomationDesigner:
 
     def create_project(self, prompt: str) -> AutomationGenerationResult:
         analysis = self.analyze(prompt)
-        manifest = ManifestGenerator.validate(analysis.manifest_data)
+        return self.create_project_from_manifest(
+            analysis.manifest_data,
+            pattern=analysis.pattern,
+            analysis=analysis,
+        )
+
+    def create_project_from_manifest(
+        self,
+        manifest_data: dict,
+        pattern: str = "generic",
+        analysis: AutomationAnalysis | None = None,
+    ) -> AutomationGenerationResult:
+        manifest = ManifestGenerator.validate(manifest_data)
+        analysis = analysis or self._analysis_from_manifest(manifest)
         artifacts = ProjectScaffolder.create_automation_project(
             manifest,
-            pattern=analysis.pattern,
+            pattern=pattern,
         )
         published_manifest = self._publish_manifest(
             source_manifest=Path(artifacts["manifest_path"]),
@@ -69,6 +82,25 @@ class AutomationDesigner:
             published_manifest_path=str(published_manifest),
             status="created",
             analysis=analysis,
+        )
+
+    @staticmethod
+    def _analysis_from_manifest(manifest):
+        return AutomationAnalysis(
+            diagnostic="Manifesto aprovado pelo usuário.",
+            viability="Manifesto validado.",
+            inputs=[item.model_dump() for item in manifest.required_files],
+            outputs=manifest.outputs,
+            steps=manifest.steps,
+            complexity="media" if len(manifest.required_files) > 1 else "baixa",
+            project_id=manifest.id,
+            project_name=manifest.name,
+            category=manifest.category,
+            description=manifest.description,
+            project_path=manifest.project_path,
+            entrypoint=manifest.entrypoint.script,
+            timeout_seconds=manifest.timeout_seconds,
+            manifest_data=manifest.model_dump(mode="json"),
         )
 
     @staticmethod
