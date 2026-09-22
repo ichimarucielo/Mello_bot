@@ -1,0 +1,19 @@
+id: automacao
+name: Automacao Gerada
+category: operacional
+description: Executar uma automacao simples 5.
+project_path: projects/automacao
+timeout_seconds: 1800
+entrypoint:
+  script: src/main.py
+required_files:
+- id: entrada
+  display_name: Arquivo de entrada
+  accepted_extensions:
+  - csv
+  required_columns:
+  - ID
+  cli_argument: --input-file
+outputs:
+- resultado.xlsx
+tags: []

@@ -1,0 +1,64 @@
+id: fbl5n_compensada
+
+name: FBL5N Compensada
+
+document_family: fbl5n
+
+source: sap
+
+aliases:
+  - fbl5n compensada
+  - compensada
+  - recebimento
+  - recebimento clientes
+  - fbl5n recebimento
+
+accepted_extensions:
+  - xlsx
+
+critical_columns:
+  - Nº documento
+  - Nome 1
+  - Mont.moeda doc.
+
+required_columns:
+  - Conta do Razão
+  - Tipo de documento
+  - Conta
+  - Referência
+  - Nº ID fiscal 1
+  - Nome 1
+  - Data de lançamento
+  - Data do documento
+  - Nº documento
+  - Vencimento líquido
+  - Mont.moeda doc.
+  - Moeda do documento
+  - Grupo Aging
+  - Percentual
+  - Valor Aging
+
+key_columns:
+  - Nº documento
+
+optional_columns:
+  - DocFat.
+  - Texto
+  - Condições pagamento
+  - Atraso após vencimento líquido
+
+validation_rules:
+  minimum_required_columns: 10
+
+category: financeiro
+
+process_type: contas_receber
+
+aging: true
+
+status: compensado
+
+expected_document_types:
+  - DZ
+  - DA
+  - EF

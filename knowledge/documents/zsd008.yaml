@@ -1,0 +1,42 @@
+id: zsd008
+
+name: ZSD008
+
+source: sap
+
+aliases:
+  - zsd008
+  - zsd 008
+
+accepted_extensions:
+  - xlsx
+
+critical_columns:
+  - Nº Nota Fiscal
+  - Valor Bruto
+
+required_columns:
+  - Razão Social
+  - CNPJ
+
+key_columns:
+  - Nº Nota Fiscal
+
+optional_columns:
+  - Descrição
+  - N° RPS
+  - Fatura Billing
+  - Data RPS
+  - Período
+  - Data Vencimento
+  - Discriminação
+  - Link NFS-e
+  - Link Boleto
+  - Qtde Transação
+  - Preço Unitário
+  - Substituição
+
+validation_rules:
+  minimum_required_columns: 4
+
+category: financeiro

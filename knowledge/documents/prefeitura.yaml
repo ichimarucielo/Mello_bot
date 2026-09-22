@@ -1,0 +1,58 @@
+id: prefeitura_nfse
+
+name: Prefeitura NFS-e
+
+document_family: prefeitura
+
+source: prefeitura
+
+aliases:
+  - prefeitura
+  - nfse
+  - nfs-e
+  - nota fiscal prefeitura
+  - relatorio prefeitura
+
+accepted_extensions:
+  - csv
+
+critical_columns:
+  - Numero NF
+  - Numero RPS
+  - CNPJ
+  - Valor Serviço
+
+required_columns:
+  - Data NF
+  - Data RPS
+  - Numero NF
+  - Numero RPS
+  - CNPJ
+  - Tomador
+  - Código Servico
+  - Valor Serviço
+  - Total NF
+
+key_columns:
+  - Numero NF
+
+optional_columns:
+  - Tomador Cidade
+  - Tomador UF
+  - ISSQN Retido
+  - Valor Previsto ISSQN
+  - IRRF
+  - PIS
+  - Cofins
+  - CSSL
+  - Chave de acesso da NFS-e
+  - Código de Autenticidade
+
+validation_rules:
+  minimum_required_columns: 6
+
+category: fiscal
+
+process_type: nfse
+
+government_document: true

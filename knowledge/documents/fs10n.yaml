@@ -1,0 +1,54 @@
+id: fs10n
+
+name: FS10N
+
+document_family: fs10n
+
+source: sap
+
+aliases:
+  - fs10n
+  - saldo razao
+  - saldo razão
+  - conta contabil
+  - conta contábil
+
+accepted_extensions:
+  - xlsx
+
+critical_columns:
+  - Conta
+  - Nº documento
+  - Montante em moeda interna
+
+required_columns:
+  - Conta
+  - Data do documento
+  - Referência
+  - Ano/Mês
+  - Data de lançamento
+  - Tipo de documento
+  - Nº documento
+  - Montante em moeda interna
+
+key_columns:
+  - Conta
+  - Nº documento
+
+optional_columns:
+  - Símb.prtds.em aberto/comp
+  - Atribuição
+  - Cód.Razão Especial
+  - Texto
+  - Centro custo
+  - Empresa
+  - Centro de lucro
+
+validation_rules:
+  minimum_required_columns: 6
+
+category: financeiro
+
+process_type: razao_contabil
+
+accounting: true

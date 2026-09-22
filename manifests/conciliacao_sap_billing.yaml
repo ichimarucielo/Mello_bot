@@ -13,14 +13,20 @@ required_files:
   accepted_extensions:
   - xlsx
   required_columns:
-  - DOCUMENTO
+  - Conta
+  - Data do documento
+  - Referência
+  - Ano/Mês
+  - Data de lançamento
+  - Tipo de documento
+  - Nº documento
+  - Montante em moeda interna
   cli_argument: --sap
 - id: billing
   display_name: Billing
   accepted_extensions:
   - xlsx
-  required_columns:
-  - DOCUMENTO
+  required_columns: []
   cli_argument: --billing
 outputs:
 - conciliacao.xlsx

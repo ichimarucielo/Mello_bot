@@ -5,7 +5,7 @@ from typing import Any
 
 from core.manifest_generator import ManifestGenerator
 from core.models import AutomationAnalysis
-
+from core.document_catalog import DocumentCatalog
 
 class AIService(ABC):
     """Contrato para provedores de analise de automacoes."""
@@ -17,6 +17,8 @@ class AIService(ABC):
 
 class MockAIService(AIService):
     """Analisador local deterministico para desenvolvimento e testes."""
+
+    CATALOG = DocumentCatalog()
 
     SAP_REPORT_TERMS = (
         "fs10n",
@@ -288,7 +290,7 @@ class MockAIService(AIService):
                 )
             )
         return cls._deduplicate_entities(entities)
-
+    
     @staticmethod
     def _file_entity(
         file_id: str,
@@ -298,6 +300,11 @@ class MockAIService(AIService):
         report: str | None = None,
         attributes: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+
+        document = MockAIService.CATALOG.documents.get(
+            report or source
+        )
+
         return {
             "id": file_id,
             "display_name": display_name,
@@ -305,30 +312,58 @@ class MockAIService(AIService):
             "report": report or source,
             "extension": extension,
             "cli_argument": f"--{file_id.replace('_', '-')}",
-            "required_columns": ["DOCUMENTO"],
+            "required_columns": (
+                document.get("required_columns", [])
+                if document
+                else []
+            ),
             "attributes": attributes or {},
         }
 
     @staticmethod
     def _clean_qualifier(value: str) -> str:
         value = re.sub(r"\b(?:e|outro|do|de|mes)\b", " ", value)
-        month_match = re.search(r"\b(?:mes\s*)?(\d{1,2})\b", value)
+
+        month_match = re.search(
+            r"\b(?:mes\s*)?(\d{1,2})\b",
+            value,
+        )
+
         if month_match:
             return f"mes_{month_match.group(1)}"
-        tokens = re.findall(r"[a-z0-9]+", value)
-        for token in ("atual", "anterior", "historico", "aberta", "compensada", "fechada", "pendente"):
+
+        tokens = re.findall(
+            r"[a-z0-9]+",
+            value,
+        )
+
+        for token in (
+            "atual",
+            "anterior",
+            "historico",
+            "aberta",
+            "compensada",
+            "fechada",
+            "pendente",
+        ):
             if token in tokens:
                 return token
+
         return ""
 
     @staticmethod
-    def _deduplicate_entities(entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _deduplicate_entities(
+        entities: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+
         unique: list[dict[str, Any]] = []
         seen: set[str] = set()
+
         for entity in entities:
             if entity["id"] not in seen:
                 unique.append(entity)
                 seen.add(entity["id"])
+
         return unique
 
     @classmethod

@@ -1,0 +1,57 @@
+id: fbl5n_aberta
+
+name: FBL5N Em Aberto
+
+source: sap
+
+aliases:
+  - fbl5n
+  - fbl5n aberta
+  - em aberto
+  - aging
+  - aging aberto
+
+accepted_extensions:
+  - xlsx
+
+critical_columns:
+  - Nº documento
+  - Nome 1
+  - Valor Aging
+
+required_columns:
+  - Conta do Razão
+  - Tipo de documento
+  - Conta
+  - Referência
+  - Nº ID fiscal 1
+  - Nome 1
+  - Data de lançamento
+  - Data do documento
+  - Nº documento
+  - Vencimento líquido
+  - Mont.moeda doc.
+  - Grupo Aging
+  - Percentual
+  - Valor Aging
+  - Atraso após vencimento líquido
+
+key_columns:
+  - Nº documento
+
+optional_columns:
+  - DocFat.
+  - Moeda do documento
+  - Texto
+  - Condições pagamento
+
+validation_rules:
+  minimum_required_columns: 10
+
+category: financeiro
+
+process_type: contas_receber
+
+aging: true
+
+status: aberto

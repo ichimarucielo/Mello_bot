@@ -1,33 +1,24 @@
 id: conciliacao_contas_pagar_receber
 name: Conciliacao Contas a Pagar x Contas a Receber
 category: financeiro
-description: 'Crie um relatório chamado: "Diferença de pagar e receber"
-
-  Relatorios usados serão 2: zsd008 em formato de excel do mes 07 (julho) e outro
-  sera o zsd008 em formato de excel do mes 08 (agosto)
-
-  Preciso que diferencie notas fiscais compensadas e em abertas por meio de status.
-
-  Gere um relatório chamado diferença receber x a pagar.'
+description: Comparar contas a pagar e contas a receber 0.
 project_path: projects/conciliacao_contas_pagar_receber
 timeout_seconds: 1800
 entrypoint:
   script: src/main.py
 required_files:
-- id: zsd008_mes_07
-  display_name: ZSD008 Mes 07
+- id: contas_pagar
+  display_name: Contas a Pagar
   accepted_extensions:
   - xlsx
-  required_columns:
-  - DOCUMENTO
-  cli_argument: --zsd008-mes-07
-- id: zsd008_mes_08
-  display_name: ZSD008 Mes 08
+  required_columns: []
+  cli_argument: --contas-pagar
+- id: contas_receber
+  display_name: Contas a Receber
   accepted_extensions:
   - xlsx
-  required_columns:
-  - DOCUMENTO
-  cli_argument: --zsd008-mes-08
+  required_columns: []
+  cli_argument: --contas-receber
 outputs:
 - conciliacao.xlsx
 - divergencias.xlsx
