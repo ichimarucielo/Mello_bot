@@ -8,6 +8,7 @@ from core.models import (
     AutomationGenerationResult,
 )
 from core.project_scaffolder import ProjectScaffolder
+from core.pipeline_validator import PipelineValidator
 from core.settings import MANIFESTS_DIR
 
 
@@ -54,6 +55,7 @@ class AutomationDesigner:
         analysis: AutomationAnalysis | None = None,
     ) -> AutomationGenerationResult:
         manifest = ManifestGenerator.validate(manifest_data)
+        PipelineValidator.assert_valid(manifest.model_dump(mode="json"))
         analysis = analysis or self._analysis_from_manifest(manifest)
         artifacts = ProjectScaffolder.create_automation_project(
             manifest,
@@ -101,6 +103,9 @@ class AutomationDesigner:
             entrypoint=manifest.entrypoint.script,
             timeout_seconds=manifest.timeout_seconds,
             manifest_data=manifest.model_dump(mode="json"),
+            pipeline_validation=PipelineValidator.validate(
+                manifest.model_dump(mode="json")
+            ),
         )
 
     @staticmethod

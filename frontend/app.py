@@ -19,6 +19,7 @@ import streamlit.components.v1 as components
 from core.history_service import HistoryService
 from core.logger import log_automation_event
 from core.orchestrator import Orchestrator
+from core.pipeline_validator import PipelineValidator
 
 # =============================================================================
 # LOGGING
@@ -301,9 +302,13 @@ def render_mello_ai_page() -> None:
             width="stretch",
         )
     with project_col:
+        validation = st.session_state.get("mello_ai_pipeline_validation", {})
         project_clicked = st.button(
             "🚀 Aprovar e gerar projeto",
-            disabled=not bool(st.session_state.get("mello_ai_approved")),
+            disabled=(
+                not bool(st.session_state.get("mello_ai_approved"))
+                or not validation.get("valid", False)
+            ),
             width="stretch",
         )
 
@@ -316,6 +321,9 @@ def render_mello_ai_page() -> None:
             st.session_state["mello_ai_manifest_data"] = st.session_state[
                 "mello_ai_analysis"
             ].get("manifest_data", {})
+            st.session_state["mello_ai_pipeline_validation"] = st.session_state[
+                "mello_ai_analysis"
+            ].get("pipeline_validation", {})
             st.session_state["mello_ai_approved"] = False
             st.session_state.pop("mello_ai_project", None)
             st.session_state.pop("mello_ai_manifest", None)
@@ -418,6 +426,18 @@ def render_mello_ai_page() -> None:
                 for row in output_rows
                 if row.get("output")
             ]
+        pipeline_validation = PipelineValidator.validate(manifest_data)
+        st.session_state["mello_ai_pipeline_validation"] = pipeline_validation
+        st.write("**Validação do pipeline**")
+        if pipeline_validation["valid"]:
+            st.success(
+                f"Pipeline consistente: {pipeline_validation['input_count']} documentos, "
+                f"{pipeline_validation['step_count']} operações e "
+                f"{pipeline_validation['output_count']} outputs."
+            )
+        else:
+            for error in pipeline_validation["errors"]:
+                st.error(error)
         st.write("**Pipeline draft**")
         edited_steps = st.data_editor(
             manifest_data.get("steps", analysis.get("steps", [])),
@@ -431,10 +451,13 @@ def render_mello_ai_page() -> None:
             if hasattr(edited_steps, "to_dict")
             else edited_steps
         )
+        pipeline_validation = PipelineValidator.validate(manifest_data)
+        st.session_state["mello_ai_pipeline_validation"] = pipeline_validation
         st.session_state["mello_ai_manifest_data"] = manifest_data
         st.divider()
         approved = st.checkbox(
             "Aprovo este rascunho para gerar o projeto",
+            disabled=not pipeline_validation["valid"],
             key="mello_ai_approved",
         )
         if approved:

@@ -1,6 +1,8 @@
 from core.ai_service import MockAIService
 from core.document_catalog import DocumentCatalog
 from core.document_engine import DocumentDefinition, DocumentMatcher
+from core.pipeline_validator import PipelineValidator
+from core.generic_document_detector import GenericDocumentDetector
 
 
 def test_catalog_matches_documents_without_exposing_source_as_identity():
@@ -144,7 +146,8 @@ def test_planilha_input_prefers_excel_extension():
     analysis = MockAIService().analyze("Recebo uma planilha de vendas.")
 
     assert analysis.inputs[0]["extension"] == "xlsx"
-    assert analysis.inputs[0]["display_name"] == "Arquivo de entrada"
+    assert analysis.inputs[0]["id"] == "vendas"
+    assert analysis.inputs[0]["display_name"] == "Vendas"
 
 
 def test_understanding_summarizes_generic_sales_pipeline():
@@ -172,3 +175,53 @@ def test_understanding_summarizes_generic_sales_pipeline():
         "output_count": 1,
         "project_name": "Análise de Margem por Cliente",
     }
+
+
+def test_pipeline_validator_rejects_join_without_two_inputs():
+    result = PipelineValidator.validate({
+        "required_files": [{"id": "entrada"}],
+        "steps": [{"type": "join", "left_key": "cnpj", "right_key": "cnpj"}],
+        "outputs": ["resultado.xlsx"],
+    })
+
+    assert result["valid"] is False
+    assert "Join requer pelo menos duas entradas." in result["errors"][0]
+
+
+def test_pipeline_validator_accepts_two_input_join():
+    result = PipelineValidator.validate({
+        "required_files": [{"id": "vendas"}, {"id": "clientes"}],
+        "steps": [{"type": "join", "left_key": "cnpj", "right_key": "cnpj"}],
+        "outputs": ["resultado.xlsx"],
+    })
+
+    assert result["valid"] is True
+
+
+def test_generic_detector_finds_two_business_documents():
+    documents = GenericDocumentDetector.detect(
+        "Tenho uma planilha de vendas e outra de clientes."
+    )
+
+    assert [(document.id, document.extension) for document in documents] == [
+        ("vendas", "xlsx"),
+        ("clientes", "xlsx"),
+    ]
+
+
+def test_generic_detector_finds_two_unnamed_csv_inputs():
+    documents = GenericDocumentDetector.detect("Recebo dois CSVs de entrada.")
+
+    assert [document.id for document in documents] == ["entrada_1", "entrada_2"]
+
+
+def test_generic_business_documents_support_join_review():
+    analysis = MockAIService().analyze(
+        "Tenho uma planilha de vendas e outra de clientes. "
+        "Quero juntar as informações e gerar um resumo."
+    )
+
+    assert [item["id"] for item in analysis.inputs] == ["vendas", "clientes"]
+    assert [step["type"] for step in analysis.steps] == ["join", "aggregate"]
+    assert analysis.outputs == ["resumo_clientes.xlsx"]
+    assert analysis.pipeline_validation["valid"] is True

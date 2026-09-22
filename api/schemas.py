@@ -85,6 +85,7 @@ class AIAnalyzeResponse(BaseModel):
     steps: list[dict[str, Any]] = []
     manifest_data: dict[str, Any] = {}
     understanding: dict[str, Any] = {}
+    pipeline_validation: dict[str, Any] = {}
 
 
 class AIManifestResponse(BaseModel):

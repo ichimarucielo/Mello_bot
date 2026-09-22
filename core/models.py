@@ -148,6 +148,8 @@ class AutomationAnalysis(BaseModel):
 
     understanding: dict[str, Any] = Field(default_factory=dict)
 
+    pipeline_validation: dict[str, Any] = Field(default_factory=dict)
+
 
 class AutomationGenerationResult(BaseModel):
     project_id: str

@@ -8,6 +8,8 @@ from core.models import AutomationAnalysis
 from core.document_catalog import DocumentCatalog
 from core.document_engine import FileEntity
 from core.pipeline_catalog import mentions
+from core.pipeline_validator import PipelineValidator
+from core.generic_document_detector import GenericDocumentDetector
 
 class AIService(ABC):
     """Contrato para provedores de analise de automacoes."""
@@ -170,6 +172,7 @@ class MockAIService(AIService):
             }
             for item in inputs
         ]
+        pipeline_validation = PipelineValidator.validate(manifest_data)
 
         return AutomationAnalysis(
             diagnostic=(
@@ -195,6 +198,7 @@ class MockAIService(AIService):
             timeout_seconds=manifest_data["timeout_seconds"],
             manifest_data=manifest_data,
             understanding=understanding,
+            pipeline_validation=pipeline_validation,
         )
 
     @staticmethod
@@ -246,6 +250,28 @@ class MockAIService(AIService):
         entities = cls._detect_catalog_documents(
             prompt
         )
+        catalog_ids = {entity["id"] for entity in entities}
+        catalog_labels = {
+            entity["display_name"].lower()
+            for entity in entities
+        }
+        generic_documents = GenericDocumentDetector.detect(prompt)
+        for document in generic_documents:
+            if (
+                document.id in catalog_ids
+                or any(document.id in label for label in catalog_labels)
+                or (document.id.startswith("entrada_") and entities)
+            ):
+                continue
+            entities.append(
+                cls._file_entity(
+                    file_id=document.id,
+                    display_name=document.display_name,
+                    source="generic",
+                    report=document.id,
+                    extension=document.extension,
+                )
+            )
 
         for report in ("zsd008", "fs10n", "fbl3n"):
             matches = list(re.finditer(rf"\b{report}\b", prompt))
@@ -589,6 +615,10 @@ class MockAIService(AIService):
                 return ["resumo_clientes.xlsx"]
             if "margem" in prompt and "cliente" in prompt:
                 return ["vendas_margem_por_cliente.xlsx"]
+            return ["resumo_clientes.xlsx"]
+        if not reconciliation and "aggregate" in {
+            step["type"] for step in steps
+        } and "resumo" in prompt:
             return ["resumo_clientes.xlsx"]
         if consolidation and not reconciliation:
             return ["consolidado.xlsx"]

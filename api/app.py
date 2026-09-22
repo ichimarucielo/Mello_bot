@@ -17,7 +17,7 @@ from api.schemas import (
 )
 from core.executor import Executor
 from core.orchestrator import Orchestrator
-from fastapi import File
+from fastapi import File, HTTPException
 from fastapi import UploadFile
 from typing import Annotated
 from fastapi.responses import FileResponse
@@ -58,11 +58,14 @@ def generate_automation_manifest(request: AutomationRequest):
 def create_automation_project(request: AICreateProjectRequest):
     designer = AutomationDesigner()
     manifest_data = getattr(request, "manifest_data", None)
-    result = (
-        designer.create_project_from_manifest(manifest_data)
-        if manifest_data
-        else designer.create_project(request.prompt)
-    )
+    try:
+        result = (
+            designer.create_project_from_manifest(manifest_data)
+            if manifest_data
+            else designer.create_project(request.prompt)
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     return result.model_dump(
         include={
             "project_id",
