@@ -17,6 +17,7 @@ from core.validator import Validator
 from core.manifest_generator import ManifestGenerator
 from core.project_scaffolder import ProjectScaffolder
 from core.health_service import HealthService
+from core.storage_provider import get_storage_provider
 
 
 class Orchestrator:
@@ -234,10 +235,13 @@ class Orchestrator:
             execution_id=execution_id,
             project_id=project_id,
             started_at=datetime.now(),
+            manifest=project,
+            inputs=project_files,
+            storage_provider=get_storage_provider().name,
+            working_directory=str(
+                (BASE_DIR / project.project_path).resolve()
+            ),
         )
-
-        _ = context  # Contexto preparado para futura integração
-                    # com Executor e observabilidade.
 
         execution_result = Executor.run(
             project_id=project_id,

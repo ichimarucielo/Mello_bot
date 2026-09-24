@@ -61,3 +61,13 @@ class DocumentCatalog:
 
     def match(self, text: str) -> list[DocumentDefinition]:
         return self.matcher.match(text)
+
+    def resolve_profiles(self, text: str) -> list[dict[str, Any]]:
+        return [
+            self.documents[document.id]
+            for document in self.match(text)
+            if document.id in self.documents
+        ]
+
+    def get_profile(self, document_id: str) -> dict[str, Any] | None:
+        return self.documents.get(document_id)

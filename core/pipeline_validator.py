@@ -10,7 +10,8 @@ class PipelineValidator:
     @classmethod
     def validate(cls, manifest: dict[str, Any]) -> dict[str, Any]:
         inputs = manifest.get("required_files", [])
-        steps = manifest.get("steps", [])
+        pipeline = manifest.get("pipeline") or {}
+        steps = manifest.get("steps", []) or pipeline.get("operations", [])
         outputs = manifest.get("outputs", [])
         errors: list[str] = []
         warnings: list[str] = []

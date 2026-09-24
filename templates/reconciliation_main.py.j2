@@ -26,7 +26,7 @@ def reconcile(left: pd.DataFrame, right: pd.DataFrame) -> tuple[pd.DataFrame, pd
     common_columns = [column for column in left.columns if column in right.columns]
     if not common_columns:
         raise ValueError("Nenhuma coluna comum encontrada para a conciliacao.")
-    merged = left.merge(right, on=common_columns, how="outer", indicator=True, suffixes=("_sap", "_billing"))
+    merged = left.merge(right, on=common_columns, how="outer", indicator=True, suffixes=("_left", "_right"))
     matched = merged[merged["_merge"] == "both"].drop(columns=["_merge"])
     divergences = merged[merged["_merge"] != "both"].drop(columns=["_merge"])
     return matched, divergences

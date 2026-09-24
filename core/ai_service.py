@@ -6,11 +6,10 @@ from typing import Any
 from core.manifest_generator import ManifestGenerator
 from core.models import AutomationAnalysis, ExecutionPlan, OperationStep
 from core.pipeline_catalog import get_operation
-from core.document_catalog import DocumentCatalog
-from core.document_engine import FileEntity
 from core.pipeline_catalog import mentions
 from core.pipeline_validator import PipelineValidator
 from core.generic_document_detector import GenericDocumentDetector
+from core.document_resolver import DocumentResolver
 
 class AIService(ABC):
     """Contrato para provedores de analise de automacoes."""
@@ -23,55 +22,7 @@ class AIService(ABC):
 class MockAIService(AIService):
     """Analisador local deterministico para desenvolvimento e testes."""
 
-    CATALOG = DocumentCatalog()
-
-    SAP_REPORT_TERMS = (
-        "fs10n",
-        "fbl3n",
-        "fbl5n",
-        "fbl5n aberta",
-        "fbl5n compensada",
-        "zsd008",
-        "zfaturamento",
-    )
-
-    DOMAIN_EXTENSIONS = {
-        "sap": "xlsx",
-        "billing": "xlsx",
-        "prefeitura": "csv",
-        "antifraude": "xlsx",
-    }
-
-    SOURCE_PATTERNS = {
-        "contas_pagar": (
-            "contas a pagar",
-            "contas pagar",
-            "contas_pagar",
-            "a pagar",
-        ),
-        "contas_receber": (
-            "contas a receber",
-            "contas receber",
-            "contas_receber",
-            "a receber",
-        ),
-        "sap": ("sap",) + SAP_REPORT_TERMS,
-        "billing": ("billing", "billings"),
-        "antifraude": ("antifraude", "fraude", "risco"),
-        "salesforce": ("salesforce", "sales force"),
-        "prefeitura": ("prefeitura", "rps", "nota fiscal"),
-    }
-
-    FINANCIAL_TERMS = (
-        "contas",
-        "faturamento",
-        "billing",
-        "financeiro",
-        "fornecedor",
-        "pagamento",
-        "recebimento",
-        "sap",
-    )
+    RESOLVER = DocumentResolver()
 
     RECONCILIATION_TERMS = (
         "compar",
@@ -79,8 +30,6 @@ class MockAIService(AIService):
         "diverg",
         "cruz",
         "confront",
-        "apenas sap",
-        "apenas billing",
     )
 
     CONSOLIDATION_TERMS = (
@@ -102,10 +51,12 @@ class MockAIService(AIService):
         file_entities = self._detect_file_entities(prompt_lower)
         sources = self._detect_sources(prompt_lower, file_entities)
         document_ids = self._document_ids(file_entities)
+        profile_metadata = self.RESOLVER.profile_metadata(document_ids)
         reconciliation = self._is_reconciliation(
             prompt_lower,
             document_ids,
             file_entities,
+            profile_metadata,
         )
         consolidation = self._is_consolidation(prompt_lower)
         power_bi = self._is_power_bi(prompt_lower)
@@ -114,6 +65,7 @@ class MockAIService(AIService):
             reconciliation,
             consolidation,
             power_bi,
+            profile_metadata,
         )
         project_id = self._project_id(
             prompt_lower,
@@ -121,6 +73,7 @@ class MockAIService(AIService):
             reconciliation,
             consolidation,
             power_bi,
+            profile_metadata,
         )
         project_name = self._project_name(
             prompt_lower,
@@ -128,15 +81,18 @@ class MockAIService(AIService):
             reconciliation,
             consolidation,
             power_bi,
+            profile_metadata,
         )
-        category = self._category(document_ids, reconciliation, power_bi, prompt_lower)
+        category = self._category(
+            document_ids, reconciliation, power_bi, prompt_lower, profile_metadata
+        )
         inputs = self._inputs(
             prompt_lower,
             reconciliation,
             power_bi,
             file_entities,
         )
-        steps = self._steps(prompt_lower, reconciliation)
+        steps = self._steps(prompt_lower, reconciliation, profile_metadata)
         outputs = self._outputs(
             document_ids,
             reconciliation,
@@ -144,6 +100,7 @@ class MockAIService(AIService):
             power_bi,
             prompt_lower,
             steps,
+            profile_metadata,
         )
         description = normalized_prompt.rstrip(".") + "."
         understanding = self._understanding(inputs, steps, outputs, project_name)
@@ -152,6 +109,30 @@ class MockAIService(AIService):
             steps=steps,
             outputs=outputs,
             project_name=project_name,
+        )
+        resolved_profiles = self.RESOLVER.resolve_profiles(prompt_lower)
+        resolver_keys = self.RESOLVER.infer_keys(prompt_lower, inputs)
+        execution_plan = execution_plan.model_copy(
+            update={
+                "profiles": [
+                    {
+                        "id": profile["id"],
+                        "name": profile.get("name", profile["id"]),
+                    }
+                    for profile in resolved_profiles
+                ],
+                "keys": resolver_keys,
+                "risks": (
+                    ["Os nomes das colunas devem ser confirmados com os arquivos reais."]
+                    if inputs
+                    else ["Nenhuma entrada foi identificada."]
+                ),
+                "open_questions": (
+                    ["Confirme as colunas e a chave de negócio antes da execução."]
+                    if inputs
+                    else ["Quais arquivos devem ser processados?"]
+                ),
+            }
         )
 
         manifest_data = ManifestGenerator.build_manifest_data(
@@ -169,6 +150,12 @@ class MockAIService(AIService):
             steps=steps,
         )
         manifest_data["pattern"] = pattern
+        manifest_data["pipeline"] = {
+            "operations": [
+                OperationStep.model_validate(step).model_dump(mode="json")
+                for step in steps
+            ]
+        }
         manifest_data["required_files"] = [
             {
                 "id": item["id"],
@@ -225,252 +212,16 @@ class MockAIService(AIService):
         prompt: str,
         file_entities: list[dict[str, Any]],
     ) -> list[str]:
-        detected = [
-            source
-            for source, patterns in cls.SOURCE_PATTERNS.items()
-            if any(pattern in prompt for pattern in patterns)
-        ]
+        detected = cls.RESOLVER.source_patterns(prompt)
         for entity in file_entities:
             source = entity["source"]
-            if source not in detected:
+            if source and source not in detected:
                 detected.append(source)
         return detected
 
     @classmethod
-    def _detect_catalog_documents(
-        cls,
-        prompt: str,
-    ) -> list[dict[str, Any]]:
-
-        return [
-            cls._file_entity(
-                file_id=document.id,
-                display_name=document.name,
-                source=document.source or document.id,
-                report=document.id,
-                extension=document.accepted_extensions[0],
-            )
-            for document in cls.CATALOG.match(prompt)
-            if document.accepted_extensions
-        ]
-
-    @classmethod
     def _detect_file_entities(cls, prompt: str) -> list[dict[str, Any]]:
-        entities = cls._detect_catalog_documents(
-            prompt
-        )
-        catalog_ids = {entity["id"] for entity in entities}
-        catalog_labels = {
-            entity["display_name"].lower()
-            for entity in entities
-        }
-        generic_documents = GenericDocumentDetector.detect(prompt)
-        for document in generic_documents:
-            if (
-                document.id in catalog_ids
-                or any(document.id in label for label in catalog_labels)
-                or (document.id.startswith("entrada_") and entities)
-            ):
-                continue
-            entities.append(
-                cls._file_entity(
-                    file_id=document.id,
-                    display_name=document.display_name,
-                    source="generic",
-                    report=document.id,
-                    extension=document.extension,
-                )
-            )
-
-        for report in ("zsd008", "fs10n", "fbl3n"):
-            matches = list(re.finditer(rf"\b{report}\b", prompt))
-            for index, match in enumerate(matches):
-                next_start = matches[index + 1].start() if index + 1 < len(matches) else len(prompt)
-                context = prompt[match.end():min(next_start, match.end() + 36)]
-                qualifier = cls._clean_qualifier(context)
-                file_id = f"{report}_{qualifier}" if qualifier else report
-                suffix = f"_{qualifier}" if qualifier else ""
-                document = cls.CATALOG.documents.get(report)
-                entities.append(
-                    cls._file_entity(
-                        file_id=file_id,
-                        display_name=(f"{report.upper()} {qualifier.replace('_', ' ').title()}"
-                                      if qualifier
-                                      else document.get("name", report.upper())
-                                      if document
-                                      else report.upper()),
-                        source="sap",
-                        report=report,
-                        extension="xlsx",
-                        attributes={"qualifier": qualifier},
-                    )
-                )
-
-        for match in re.finditer(r"\bfbl5n\b", prompt):
-            context = prompt[match.end():match.end() + 24]
-            qualifier = cls._clean_qualifier(context)
-            file_id = f"fbl5n_{qualifier}" if qualifier else "sap"
-            entities.append(
-                cls._file_entity(
-                    file_id=file_id,
-                    display_name=f"FBL5N {qualifier.replace('_', ' ').title()}".strip(),
-                    source="sap",
-                    report="fbl5n",
-                    extension="xlsx",
-                    attributes={"qualifier": qualifier},
-                )
-            )
-
-        if "contas a pagar" in prompt and "contas a receber" in prompt:
-            entities.extend(
-                [
-                    cls._file_entity(
-                        "contas_pagar", "Contas a Pagar", "contas_pagar", "xlsx",
-                        attributes={"context": "contas a pagar"},
-                    ),
-                    cls._file_entity(
-                        "contas_receber", "Contas a Receber", "contas_receber", "xlsx",
-                        attributes={"context": "contas a receber"},
-                    ),
-                ]
-            )
-
-        if "billing" in prompt:
-            entities.append(
-                cls._file_entity(
-                    "billing", "Billing", "billing", "xlsx",
-                    attributes={"context": "billing"},
-                )
-            )
-        if "prefeitura" in prompt:
-            entities.append(
-                cls._file_entity(
-                    "prefeitura", "Prefeitura", "prefeitura", "csv",
-                    attributes={"context": "prefeitura"},
-                )
-            )
-        if not entities and any(term in prompt for term in cls.ANTIFRAUD_TERMS):
-            entities.append(
-                cls._file_entity(
-                    "base_antifraude", "Base Antifraude", "antifraude", "xlsx",
-                    attributes={"context": "antifraude"},
-                )
-            )
-        if cls._is_period_comparison(prompt) and {
-            entity["report"] for entity in entities
-        } == {"zsd008"}:
-            entity = next(
-                entity for entity in entities if entity["id"] == "zsd008"
-            )
-            entities = [
-                {
-                    **entity,
-                    "id": f"{entity['id']}_antigo",
-                    "display_name": f"{entity['display_name']} Antigo",
-                    "cli_argument": f"{entity['cli_argument']}-antigo",
-                    "attributes": {**entity.get("attributes", {}), "period": "antigo"},
-                },
-                {
-                    **entity,
-                    "id": f"{entity['id']}_novo",
-                    "display_name": f"{entity['display_name']} Novo",
-                    "cli_argument": f"{entity['cli_argument']}-novo",
-                    "attributes": {**entity.get("attributes", {}), "period": "novo"},
-                },
-            ]
-        qualified_reports = {
-            entity["report"]
-            for entity in entities
-            if entity["id"] != entity["report"]
-        }
-        entities = [
-            entity
-            for entity in entities
-            if entity["report"] not in qualified_reports
-            or entity["id"] != entity["report"]
-        ]
-        return cls._deduplicate_entities(entities)
-
-    @staticmethod
-    def _is_period_comparison(prompt: str) -> bool:
-        return (
-            "zsd008" in prompt
-            and bool(re.search(r"\b(dois|duas|2)\s+relat", prompt))
-            and any(term in prompt for term in ("period", "mes", "compar"))
-        )
-    
-    @staticmethod
-    def _file_entity(
-        file_id: str,
-        display_name: str,
-        source: str,
-        extension: str,
-        report: str | None = None,
-        attributes: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
-
-        document = MockAIService.CATALOG.documents.get(
-            report or source
-        )
-
-        entity = FileEntity(
-            id=file_id,
-            display_name=display_name,
-            document_id=report or source,
-            extension=extension,
-            cli_argument=f"--{file_id.replace('_', '-')}" ,
-            required_columns=(document.get("required_columns", []) if document else []),
-            critical_columns=(document.get("critical_columns", []) if document else []),
-            attributes=attributes or {},
-            source=source,
-        )
-        return entity.as_dict()
-
-    @staticmethod
-    def _clean_qualifier(value: str) -> str:
-        value = re.sub(r"\b(?:e|outro|do|de|mes)\b", " ", value)
-
-        month_match = re.search(
-            r"\b(?:mes\s*)?(\d{1,2})\b",
-            value,
-        )
-
-        if month_match:
-            return f"mes_{month_match.group(1)}"
-
-        tokens = re.findall(
-            r"[a-z0-9]+",
-            value,
-        )
-
-        for token in (
-            "atual",
-            "anterior",
-            "historico",
-            "aberta",
-            "compensada",
-            "fechada",
-            "pendente",
-        ):
-            if token in tokens:
-                return token
-
-        return ""
-
-    @staticmethod
-    def _deduplicate_entities(
-        entities: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-
-        unique: list[dict[str, Any]] = []
-        seen: set[str] = set()
-
-        for entity in entities:
-            if entity["id"] not in seen:
-                unique.append(entity)
-                seen.add(entity["id"])
-
-        return unique
+        return cls.RESOLVER.detect_file_entities(prompt)
 
     @classmethod
     def _is_consolidation(cls, prompt: str) -> bool:
@@ -487,7 +238,10 @@ class MockAIService(AIService):
         reconciliation: bool,
         consolidation: bool,
         power_bi: bool,
+        profile_metadata: dict[str, Any],
     ) -> str:
+        if profile_metadata.get("pattern"):
+            return profile_metadata["pattern"]
         if reconciliation:
             return "reconciliation"
         if consolidation:
@@ -506,20 +260,15 @@ class MockAIService(AIService):
         prompt: str,
         document_ids: list[str],
         file_entities: list[dict[str, Any]],
+        profile_metadata: dict[str, Any],
     ) -> bool:
         explicit_reconciliation = any(
             term in prompt
             for term in cls.RECONCILIATION_TERMS
             if term != "cruz"
         )
-        known_reconciliation_documents = any(
-            document_id in {
-                "fbl5n_aberta",
-                "fbl5n_compensada",
-                "fs10n",
-                "billing",
-            }
-            for document_id in document_ids
+        known_reconciliation_documents = "reconciliation" in profile_metadata.get(
+            "capabilities", []
         )
         return len(file_entities) >= 2 and (
             explicit_reconciliation or known_reconciliation_documents
@@ -545,17 +294,21 @@ class MockAIService(AIService):
         reconciliation: bool,
         consolidation: bool,
         power_bi: bool,
+        profile_metadata: dict[str, Any],
     ) -> str:
-        if MockAIService._is_period_comparison(prompt):
-            base = "comparacao_zsd008_periodos"
+        profiles = profile_metadata.get("profiles", [])
+        configured_id = next(
+            (profile.get("project_id") for profile in profiles if profile.get("project_id")),
+            None,
+        )
+        if configured_id:
+            base = configured_id
         elif "margem" in prompt and "cliente" in prompt:
             base = "resumo_clientes_vendas"
         elif power_bi and not reconciliation:
             base = "dataset_power_bi"
         elif any(term in prompt for term in MockAIService.ANTIFRAUD_TERMS):
             base = "antifraude"
-        elif reconciliation and {"contas_pagar", "contas_receber"}.issubset(document_ids):
-            base = "conciliacao_contas_pagar_receber"
         elif reconciliation:
             base = "conciliacao_" + "_".join(
                 MockAIService._document_families(document_ids) or ["arquivos"]
@@ -575,17 +328,21 @@ class MockAIService(AIService):
         reconciliation: bool,
         consolidation: bool,
         power_bi: bool,
+        profile_metadata: dict[str, Any],
     ) -> str:
-        if MockAIService._is_period_comparison(prompt):
-            return "Comparacao ZSD008 entre Periodos"
+        profiles = profile_metadata.get("profiles", [])
+        configured_name = next(
+            (profile.get("project_name") for profile in profiles if profile.get("project_name")),
+            None,
+        )
+        if configured_name:
+            return configured_name
         if "margem" in prompt and "cliente" in prompt:
             return "Análise de Margem por Cliente"
         if power_bi and not reconciliation:
             return "Dataset Power BI"
         if any(term in " ".join(document_ids) for term in ("antifraude", "fraude", "risco")):
             return "Antifraude"
-        if reconciliation and {"contas_pagar", "contas_receber"}.issubset(document_ids):
-            return "Conciliacao Contas a Pagar x Contas a Receber"
         if reconciliation:
             families = MockAIService._document_families(document_ids)
             return "Conciliacao " + " x ".join(
@@ -670,14 +427,17 @@ class MockAIService(AIService):
         reconciliation: bool,
         power_bi: bool,
         prompt: str,
+        profile_metadata: dict[str, Any],
     ) -> str:
+        if profile_metadata.get("category"):
+            return profile_metadata["category"]
         if power_bi and not reconciliation:
             return "power_bi"
         if any(term in prompt for term in MockAIService.ANTIFRAUD_TERMS):
             return "risco"
-        if reconciliation or any(document_id in {"contas_pagar", "contas_receber", "fs10n", "fbl5n_aberta", "fbl5n_compensada", "billing"} for document_id in document_ids):
+        if reconciliation:
             return "financeiro"
-        if any(term in prompt for term in MockAIService.FINANCIAL_TERMS):
+        if any(term in prompt for term in ("financeiro", "faturamento", "pagamento", "fornecedor")):
             return "financeiro"
         if "salesforce" in document_ids:
             return "salesforce"
@@ -691,18 +451,16 @@ class MockAIService(AIService):
         power_bi: bool,
         prompt: str = "",
         steps: list[dict[str, Any]] | None = None,
+        profile_metadata: dict[str, Any] | None = None,
     ) -> list[str]:
         steps = steps or []
-        if MockAIService._is_period_comparison(prompt):
-            return [
-                "resumo_executivo.xlsx",
-                "nfs_perdidas.xlsx",
-                "nfs_novas.xlsx",
-                "analise_por_cliente.xlsx",
-                "analise_mensal.xlsx",
-                "top_perdas.xlsx",
-                "diagnostico.txt",
-            ]
+        profiles = (profile_metadata or {}).get("profiles", [])
+        configured_outputs = next(
+            (profile.get("suggested_outputs") for profile in profiles if profile.get("suggested_outputs")),
+            None,
+        )
+        if configured_outputs:
+            return list(configured_outputs)
         if power_bi and not reconciliation:
             return ["dataset.csv"]
         if any(term in document_ids for term in ("antifraude", "fraude", "risco")):
@@ -730,20 +488,28 @@ class MockAIService(AIService):
         return ["resultado.xlsx"]
 
     @staticmethod
-    def _steps(prompt: str, reconciliation: bool) -> list[dict[str, Any]]:
-        if MockAIService._is_period_comparison(prompt):
+    def _steps(
+        prompt: str,
+        reconciliation: bool,
+        profile_metadata: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        capabilities = (profile_metadata or {}).get("capabilities", [])
+        if "period_comparison" in capabilities:
+            profiles = (profile_metadata or {}).get("profiles", [])
+            profile = profiles[0] if profiles else {}
+            comparison = profile.get("comparison", {})
             return [
                 {"type": "normalize"},
-                {"type": "deduplicate", "key": "Número da Nota Fiscal"},
+                {"type": "deduplicate", "key": comparison.get("key", "documento")},
                 {
                     "type": "aggregate",
-                    "group_by": "Número da Nota Fiscal",
-                    "sum": ["Valor Bruto", "Qtde Transação"],
-                    "collect": "Discriminação",
+                    "group_by": comparison.get("group_by", "documento"),
+                    "sum": comparison.get("sum", []),
+                    "collect": comparison.get("collect", "itens"),
                 },
-                {"type": "reconcile", "key": "Número da Nota Fiscal"},
-                {"type": "aggregate", "group_by": "Razão Social"},
-                {"type": "sort", "column": "saldo_liquido", "descending": True},
+                {"type": "reconcile", "key": comparison.get("key", "documento")},
+                {"type": "aggregate", "group_by": comparison.get("client_group", "grupo")},
+                {"type": "sort", "column": comparison.get("sort", "saldo"), "descending": True},
             ]
         steps: list[dict[str, Any]] = []
         if reconciliation or mentions(prompt, "normalize"):
@@ -879,25 +645,6 @@ class MockAIService(AIService):
             steps.append({"type": "export"})
         return steps
 
-    @classmethod
-    def _document_columns(
-        cls,
-        document_id: str,
-    ):
-
-        document = cls.CATALOG.documents.get(
-            document_id
-        )
-
-        if not document:
-            return []
-
-        return document.get(
-            "required_columns",
-            [],
-        )
-
-
     @staticmethod
     def _inputs(
         prompt: str,
@@ -932,9 +679,7 @@ class MockAIService(AIService):
                     "display_name": "Base Antifraude",
                     "cli_argument": "--input-file",
                     "extension": extension,
-                    "required_columns": MockAIService._document_columns(
-                        "base_antifraude"
-                    ),
+                    "required_columns": [],
                 }
             ]
 
@@ -949,17 +694,10 @@ class MockAIService(AIService):
         ]
 
     @classmethod
-    def _preferred_extension(
-        cls,
-        prompt: str,
-    ) -> str:
-
-        if any(
-            term in prompt
-            for term in cls.SAP_REPORT_TERMS
-        ):
-            return cls.DOMAIN_EXTENSIONS["sap"]
-
+    def _preferred_extension(cls, prompt: str) -> str:
+        configured_extension = cls.RESOLVER.preferred_extension(prompt)
+        if configured_extension:
+            return configured_extension
         if any(
             term in prompt
             for term in (

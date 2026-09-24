@@ -26,6 +26,9 @@ Funcionalidades implementadas:
 - geração de manifesto e scaffold inicial de projeto
 - **MELLO AI**: análise de prompt, catálogo de documentos conhecidos, validação de pipeline declarativo e geração de projeto completo por padrão (genérico, conciliação, consolidação, Power BI, antifraude, validação)
 - dashboard em Streamlit e API REST em FastAPI
+- resolução genérica de documentos por catálogo com fallback para documentos descritos livremente
+- manifesto V2 compatível com `steps` legado e `pipeline.operations`
+- abstração de storage com backend local e ponto de extensão para SharePoint
 
 Limitações conhecidas:
 
@@ -90,7 +93,7 @@ Manifest  Inputs  ETL externo
 MELLO AI (paralelo, gera manifesto + scaffold)
 Prompt -> AutomationDesigner -> AIService (MockAIService)
                                    |
-                     DocumentCatalog / GenericDocumentDetector / PipelineCatalog
+                     DocumentResolver -> DocumentCatalog / GenericDocumentDetector
                                    |
                                    v
                         AutomationAnalysis -> ManifestGenerator -> PipelineValidator
@@ -110,15 +113,74 @@ Prompt -> AutomationDesigner -> AIService (MockAIService)
 7. O `ExecutionLogger` grava status, duração, arquivos e outputs em `storage/mello.db`.
 8. O histórico é lido por `HistoryService` para exibição em telas e APIs.
 
+O `ExecutionContext` acompanha a execução com manifesto, inputs, diretório de trabalho,
+provider de storage e identificador de logger. O core não contém regras de negócio de
+um documento específico; essas sugestões vivem nos perfis YAML de `knowledge/documents/`.
+
 ### Fluxo do MELLO AI (criação assistida)
 
 1. O usuário descreve o que precisa em linguagem natural (ex.: "recebo um Excel de faturamento e preciso comparar com SAP").
 2. `AutomationDesigner.analyze` delega ao `AIService` (implementação atual: `MockAIService`).
-3. O `MockAIService` usa `DocumentCatalog` (documentos conhecidos em `knowledge/documents/`) e `GenericDocumentDetector` (papéis de arquivo descritos livremente) para identificar entradas, além de `pipeline_catalog.mentions` para detectar operações (normalizar, cruzar, agregar, conciliar etc.).
+3. O `DocumentResolver` consulta o `DocumentCatalog` (perfis em `knowledge/documents/`) e usa `GenericDocumentDetector` como fallback para identificar entradas, chaves e operações.
 4. O resultado é uma `AutomationAnalysis` com diagnóstico, viabilidade, inputs, outputs, passos (`steps`) e um `manifest_data` sugerido.
-5. `ManifestGenerator` valida os dados como `Manifest` e o `PipelineValidator` verifica coerência estrutural dos `steps` (ex.: join exige duas entradas, aggregate exige `group_by`).
+5. `ManifestGenerator` aceita `steps` legado ou `pipeline.operations`, convergindo ambos para `PipelineDefinition`; o `PipelineValidator` verifica coerência estrutural.
 6. `ProjectScaffolder.create_automation_project` gera o projeto usando o template correspondente ao `pattern` (genérico, conciliação, consolidação, Power BI, antifraude ou validação).
 7. O manifesto gerado é publicado em `manifests/<project_id>.yaml`, tornando o projeto imediatamente disponível para execução normal.
+
+### Camada de conhecimento e domínio
+
+O fluxo de descoberta segue esta separação:
+
+```text
+knowledge/documents/*.yaml
+            |
+            v
+DocumentCatalog -> DocumentResolver -> ExecutionPlan
+                                      |
+                                      v
+                                  Manifest
+```
+
+Perfis podem declarar `aliases`, extensões, colunas obrigatórias e críticas, chaves,
+aliases de colunas e tipos semânticos. O executor, orchestrator, template engine e
+project scaffolder não devem interpretar nomes de SAP, Billing ou outros domínios.
+
+### Manifesto V2 e compatibilidade
+
+Manifestos existentes continuam usando:
+
+```yaml
+steps:
+  - type: normalize
+outputs:
+  - resultado.xlsx
+```
+
+Novos manifestos podem declarar:
+
+```yaml
+pipeline:
+  operations:
+    - operation: normalize
+    - operation: aggregate
+      parameters:
+        group_by: documento
+```
+
+As duas formas são normalizadas para `Manifest.steps` e `PipelineDefinition.operations`.
+
+### Storage
+
+O backend local continua sendo o padrão. A seleção é feita por:
+
+```text
+STORAGE_BACKEND=local
+```
+
+`StorageProvider` define a interface para inputs, outputs e listagem. `LocalStorageProvider`
+usa as pastas atuais. `SharePointStorageProvider` está preparado como ponto de extensão;
+uma implementação Graph deve usar Document Libraries para binários e Lists somente para
+metadados e histórico.
 
 ### Ciclo completo de uma automação gerada
 

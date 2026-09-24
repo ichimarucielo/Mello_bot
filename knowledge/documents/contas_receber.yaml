@@ -1,0 +1,16 @@
+id: contas_receber
+name: Contas a Receber
+source: financeiro
+aliases:
+  - contas a receber
+  - contas receber
+  - contas_receber
+accepted_extensions:
+  - xlsx
+required_columns: []
+capabilities:
+  - reconciliation
+  - aggregation
+pattern: reconciliation
+project_id: conciliacao_contas_pagar_receber
+project_name: Conciliacao Contas a Pagar x Contas a Receber

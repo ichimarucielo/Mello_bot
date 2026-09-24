@@ -12,6 +12,9 @@ class DocumentDefinition:
     critical_columns: tuple[str, ...] = ()
     required_columns: tuple[str, ...] = ()
     document_family: str | None = None
+    key_columns: tuple[str, ...] = ()
+    column_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    semantic_types: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "DocumentDefinition":
@@ -24,6 +27,12 @@ class DocumentDefinition:
             critical_columns=tuple(data.get("critical_columns", ())),
             required_columns=tuple(data.get("required_columns", ())),
             document_family=data.get("document_family"),
+            key_columns=tuple(data.get("key_columns", ())),
+            column_aliases={
+                key: tuple(value or ())
+                for key, value in data.get("column_aliases", {}).items()
+            },
+            semantic_types=data.get("semantic_types", {}),
         )
 
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from core.settings import INPUTS_DIR
+from core.storage_provider import get_storage_provider
 
 
 class FileManager:
@@ -26,30 +27,9 @@ class FileManager:
         content: bytes,
     ) -> Path:
 
-        project_folder = (
-            cls.UPLOADS_PATH /
-            project_id
+        return get_storage_provider().save_input(
+            project_id=project_id,
+            file_id=file_id,
+            file_name=file_name,
+            content=content,
         )
-
-        project_folder.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        file_extension = (
-            file_name.split(".")[-1]
-        ).lower()
-
-        target_file = (
-            project_folder /
-            f"{file_id}.{file_extension}"
-        )
-
-        with open(
-            target_file,
-            "wb",
-        ) as file:
-
-            file.write(content)
-
-        return target_file

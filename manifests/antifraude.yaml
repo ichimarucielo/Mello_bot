@@ -1,5 +1,5 @@
 id: antifraude
-name: Antifraude
+name: Automacao Gerada
 category: risco
 description: Classificar uma base de antifraude e identificar risco 2.
 project_path: projects/antifraude
@@ -10,11 +10,13 @@ required_files:
 - id: base_antifraude
   display_name: Base Antifraude
   accepted_extensions:
-  - xlsx
+  - csv
   critical_columns: []
   required_columns: []
-  cli_argument: --base-antifraude
+  cli_argument: --input-file
 steps: []
+pipeline:
+  operations: []
 outputs:
 - resultado.xlsx
 tags: []

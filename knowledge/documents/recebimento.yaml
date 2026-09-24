@@ -58,6 +58,15 @@ aging: true
 
 status: compensado
 
+capabilities:
+  - reconciliation
+  - aggregation
+pattern: reconciliation
+qualifier_strategy: context
+qualifier_tokens:
+  - compensada
+  - compensado
+
 expected_document_types:
   - DZ
   - DA

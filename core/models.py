@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 
@@ -57,25 +59,11 @@ class Manifest(BaseModel):
 
     steps: list["OperationStep"] = Field(default_factory=list)
 
+    pipeline: "PipelineDefinition | None" = None
+
     outputs: list[str]
 
     tags: list[str] = Field(
-        default_factory=list
-    )
-
-
-class ExecutionContext(BaseModel):
-    execution_id: str
-
-    project_id: str
-
-    started_at: datetime
-
-    status: ExecutionStatus = (
-        ExecutionStatus.PENDING
-    )
-
-    uploaded_files: list[str] = Field(
         default_factory=list
     )
 
@@ -190,12 +178,58 @@ class OperationStep(BaseModel):
         return super().__eq__(other)
 
 
+class PipelineDefinition(BaseModel):
+    """V2 declarative pipeline while preserving the legacy ``steps`` field."""
+
+    operations: list[OperationStep] = Field(default_factory=list)
+
+    @classmethod
+    def from_manifest(cls, manifest: Manifest) -> "PipelineDefinition":
+        if manifest.pipeline and manifest.pipeline.operations:
+            return manifest.pipeline
+        return cls(operations=list(manifest.steps))
+
+
+class ExecutionContext(BaseModel):
+    execution_id: str
+
+    project_id: str
+
+    started_at: datetime
+
+    status: ExecutionStatus = (
+        ExecutionStatus.PENDING
+    )
+
+    uploaded_files: list[str] = Field(
+        default_factory=list
+    )
+
+    manifest: Manifest | None = None
+
+    inputs: dict[str, str] = Field(default_factory=dict)
+
+    storage_provider: str = "local"
+
+    working_directory: str | None = None
+
+    logger_name: str = "mello_bot"
+
+
 class ExecutionPlan(BaseModel):
     summary: str
 
     documents: list[dict[str, Any]] = Field(default_factory=list)
 
     transformations: list[dict[str, Any]] = Field(default_factory=list)
+
+    profiles: list[dict[str, Any]] = Field(default_factory=list)
+
+    keys: list[str] = Field(default_factory=list)
+
+    risks: list[str] = Field(default_factory=list)
+
+    open_questions: list[str] = Field(default_factory=list)
 
     outputs: list[str] = Field(default_factory=list)
 
@@ -279,3 +313,6 @@ class HistoryEntry(BaseModel):
     finished_at: datetime | None = None
 
     error_message: str | None = None
+
+
+Manifest.model_rebuild()

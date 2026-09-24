@@ -1,21 +1,13 @@
-id: billing
-
-name: Billing
-
-source: billing
-
+id: fbl3n
+name: FBL3N
+document_family: fbl3n
+source: sap
 aliases:
-  - billing
-  - billings
-
+  - fbl3n
 accepted_extensions:
   - xlsx
-
 required_columns: []
-
 category: financeiro
-
 capabilities:
   - reconciliation
-  - aggregation
 pattern: reconciliation

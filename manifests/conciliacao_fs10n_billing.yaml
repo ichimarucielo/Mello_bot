@@ -41,6 +41,15 @@ steps:
   description: ''
   parameters:
     key: documento
+pipeline:
+  operations:
+  - operation: normalize
+    description: ''
+    parameters: {}
+  - operation: reconcile
+    description: ''
+    parameters:
+      key: documento
 outputs:
 - conciliacao.xlsx
 - divergencias.xlsx

@@ -57,3 +57,12 @@ process_type: contas_receber
 aging: true
 
 status: aberto
+
+capabilities:
+  - reconciliation
+  - aggregation
+pattern: reconciliation
+qualifier_strategy: context
+qualifier_tokens:
+  - aberta
+  - aberto

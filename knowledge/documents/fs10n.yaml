@@ -52,3 +52,14 @@ category: financeiro
 process_type: razao_contabil
 
 accounting: true
+
+qualifier_strategy: context
+duplicate_for_qualifier_tokens: true
+qualifier_tokens:
+  - atual
+  - anterior
+
+capabilities:
+  - reconciliation
+  - aggregation
+pattern: reconciliation

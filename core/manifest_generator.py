@@ -6,7 +6,7 @@ import unicodedata
 
 import yaml
 
-from core.models import Manifest, OperationStep
+from core.models import Manifest, OperationStep, PipelineDefinition
 from core.settings import MANIFESTS_DIR
 from core.validator import Validator
 
@@ -110,13 +110,19 @@ class ManifestGenerator:
     @staticmethod
     def validate(data: dict[str, Any]) -> Manifest:
         normalized = dict(data)
+        raw_pipeline = data.get("pipeline") or {}
+        raw_steps = data.get("steps", []) or raw_pipeline.get("operations", [])
         normalized_steps = []
-        for step in data.get("steps", []):
+        for step in raw_steps:
             step_data = OperationStep.model_validate(step).model_dump(mode="json")
             if step_data["operation"] == "remove_nulls":
                 step_data["operation"] = "drop_nulls"
             normalized_steps.append(step_data)
         normalized["steps"] = normalized_steps
+        if raw_pipeline:
+            normalized["pipeline"] = PipelineDefinition(
+                operations=[OperationStep.model_validate(step) for step in raw_steps]
+            )
         return Manifest.model_validate(normalized)
 
     @staticmethod

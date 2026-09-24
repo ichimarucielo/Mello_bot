@@ -42,6 +42,34 @@ def test_build_validate_and_serialize_manifest():
     assert "- CNPJ" in yaml_text
 
 
+def test_validate_accepts_pipeline_v2_and_normalizes_to_steps():
+    data = ManifestGenerator.build_manifest_data(
+        project_id="v2",
+        name="V2",
+        category="geral",
+        description="Pipeline V2",
+        project_path="projects/v2",
+        entrypoint="main.py",
+        file_id="input",
+        display_name="Entrada",
+        extension="csv",
+        required_columns=["documento"],
+        outputs=["resultado.xlsx"],
+    )
+    data["pipeline"] = {
+        "operations": [
+            {"operation": "normalize"},
+            {"operation": "aggregate", "parameters": {"group_by": "documento"}},
+        ]
+    }
+
+    manifest = ManifestGenerator.validate(data)
+
+    assert [step.operation for step in manifest.steps] == ["normalize", "aggregate"]
+    assert manifest.pipeline is not None
+    assert len(manifest.pipeline.operations) == 2
+
+
 def test_save_does_not_overwrite_existing_manifest(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("core.manifest_generator.MANIFESTS_DIR", tmp_path)
     manifest = ManifestGenerator.validate(

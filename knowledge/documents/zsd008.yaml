@@ -40,3 +40,36 @@ validation_rules:
   minimum_required_columns: 4
 
 category: financeiro
+
+capabilities:
+  - reconciliation
+  - period_comparison
+  - aggregation
+
+pattern: reconciliation
+project_id: comparacao_zsd008_periodos
+project_name: Comparacao ZSD008 entre Periodos
+suggested_outputs:
+  - resumo_executivo.xlsx
+  - nfs_perdidas.xlsx
+  - nfs_novas.xlsx
+  - analise_por_cliente.xlsx
+  - analise_mensal.xlsx
+  - top_perdas.xlsx
+  - diagnostico.txt
+duplicate_for_two_reports: true
+qualifier_strategy: context
+qualifier_tokens:
+  - antigo
+  - novo
+  - atual
+  - anterior
+comparison:
+  key: Nº Nota Fiscal
+  group_by: Nº Nota Fiscal
+  sum:
+    - Valor Bruto
+    - Qtde Transação
+  collect: Discriminação
+  client_group: Razão Social
+  sort: saldo_liquido
