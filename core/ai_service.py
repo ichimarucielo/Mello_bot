@@ -4,7 +4,8 @@ import unicodedata
 from typing import Any
 
 from core.manifest_generator import ManifestGenerator
-from core.models import AutomationAnalysis
+from core.models import AutomationAnalysis, ExecutionPlan, OperationStep
+from core.pipeline_catalog import get_operation
 from core.document_catalog import DocumentCatalog
 from core.document_engine import FileEntity
 from core.pipeline_catalog import mentions
@@ -146,6 +147,12 @@ class MockAIService(AIService):
         )
         description = normalized_prompt.rstrip(".") + "."
         understanding = self._understanding(inputs, steps, outputs, project_name)
+        execution_plan = self._execution_plan(
+            inputs=inputs,
+            steps=steps,
+            outputs=outputs,
+            project_name=project_name,
+        )
 
         manifest_data = ManifestGenerator.build_manifest_data(
             project_id=project_id,
@@ -161,6 +168,7 @@ class MockAIService(AIService):
             outputs=outputs,
             steps=steps,
         )
+        manifest_data["pattern"] = pattern
         manifest_data["required_files"] = [
             {
                 "id": item["id"],
@@ -199,6 +207,7 @@ class MockAIService(AIService):
             manifest_data=manifest_data,
             understanding=understanding,
             pipeline_validation=pipeline_validation,
+            execution_plan=execution_plan,
         )
 
     @staticmethod
@@ -347,6 +356,28 @@ class MockAIService(AIService):
                     attributes={"context": "antifraude"},
                 )
             )
+        if cls._is_period_comparison(prompt) and {
+            entity["report"] for entity in entities
+        } == {"zsd008"}:
+            entity = next(
+                entity for entity in entities if entity["id"] == "zsd008"
+            )
+            entities = [
+                {
+                    **entity,
+                    "id": f"{entity['id']}_antigo",
+                    "display_name": f"{entity['display_name']} Antigo",
+                    "cli_argument": f"{entity['cli_argument']}-antigo",
+                    "attributes": {**entity.get("attributes", {}), "period": "antigo"},
+                },
+                {
+                    **entity,
+                    "id": f"{entity['id']}_novo",
+                    "display_name": f"{entity['display_name']} Novo",
+                    "cli_argument": f"{entity['cli_argument']}-novo",
+                    "attributes": {**entity.get("attributes", {}), "period": "novo"},
+                },
+            ]
         qualified_reports = {
             entity["report"]
             for entity in entities
@@ -359,6 +390,14 @@ class MockAIService(AIService):
             or entity["id"] != entity["report"]
         ]
         return cls._deduplicate_entities(entities)
+
+    @staticmethod
+    def _is_period_comparison(prompt: str) -> bool:
+        return (
+            "zsd008" in prompt
+            and bool(re.search(r"\b(dois|duas|2)\s+relat", prompt))
+            and any(term in prompt for term in ("period", "mes", "compar"))
+        )
     
     @staticmethod
     def _file_entity(
@@ -507,7 +546,9 @@ class MockAIService(AIService):
         consolidation: bool,
         power_bi: bool,
     ) -> str:
-        if "margem" in prompt and "cliente" in prompt:
+        if MockAIService._is_period_comparison(prompt):
+            base = "comparacao_zsd008_periodos"
+        elif "margem" in prompt and "cliente" in prompt:
             base = "resumo_clientes_vendas"
         elif power_bi and not reconciliation:
             base = "dataset_power_bi"
@@ -535,6 +576,8 @@ class MockAIService(AIService):
         consolidation: bool,
         power_bi: bool,
     ) -> str:
+        if MockAIService._is_period_comparison(prompt):
+            return "Comparacao ZSD008 entre Periodos"
         if "margem" in prompt and "cliente" in prompt:
             return "Análise de Margem por Cliente"
         if power_bi and not reconciliation:
@@ -576,6 +619,52 @@ class MockAIService(AIService):
         }
 
     @staticmethod
+    def _execution_plan(
+        inputs: list[dict[str, Any]],
+        steps: list[dict[str, Any]],
+        outputs: list[str],
+        project_name: str,
+    ) -> ExecutionPlan:
+        transformations = []
+        for index, step in enumerate(steps, start=1):
+            typed_step = OperationStep.model_validate(step)
+            operation = typed_step.operation
+            details = typed_step.parameters
+            try:
+                description = get_operation(operation).description
+            except ValueError:
+                description = "Operação detectada."
+            transformations.append(
+                {
+                    "order": index,
+                    "operation": operation,
+                    "description": description,
+                    "parameters": details,
+                }
+            )
+
+        document_rows = [
+            {
+                "id": item["id"],
+                "name": item.get("display_name", item["id"]),
+                "source": item.get("source", "não informado"),
+                "format": item.get("extension", "não informado").upper(),
+            }
+            for item in inputs
+        ]
+        summary = (
+            f"{project_name}: {len(document_rows)} documento(s), "
+            f"{len(transformations)} transformação(ões) e "
+            f"{len(outputs)} output(s)."
+        )
+        return ExecutionPlan(
+            summary=summary,
+            documents=document_rows,
+            transformations=transformations,
+            outputs=outputs,
+        )
+
+    @staticmethod
     def _category(
         document_ids: list[str],
         reconciliation: bool,
@@ -604,6 +693,16 @@ class MockAIService(AIService):
         steps: list[dict[str, Any]] | None = None,
     ) -> list[str]:
         steps = steps or []
+        if MockAIService._is_period_comparison(prompt):
+            return [
+                "resumo_executivo.xlsx",
+                "nfs_perdidas.xlsx",
+                "nfs_novas.xlsx",
+                "analise_por_cliente.xlsx",
+                "analise_mensal.xlsx",
+                "top_perdas.xlsx",
+                "diagnostico.txt",
+            ]
         if power_bi and not reconciliation:
             return ["dataset.csv"]
         if any(term in document_ids for term in ("antifraude", "fraude", "risco")):
@@ -632,6 +731,20 @@ class MockAIService(AIService):
 
     @staticmethod
     def _steps(prompt: str, reconciliation: bool) -> list[dict[str, Any]]:
+        if MockAIService._is_period_comparison(prompt):
+            return [
+                {"type": "normalize"},
+                {"type": "deduplicate", "key": "Número da Nota Fiscal"},
+                {
+                    "type": "aggregate",
+                    "group_by": "Número da Nota Fiscal",
+                    "sum": ["Valor Bruto", "Qtde Transação"],
+                    "collect": "Discriminação",
+                },
+                {"type": "reconcile", "key": "Número da Nota Fiscal"},
+                {"type": "aggregate", "group_by": "Razão Social"},
+                {"type": "sort", "column": "saldo_liquido", "descending": True},
+            ]
         steps: list[dict[str, Any]] = []
         if reconciliation or mentions(prompt, "normalize"):
             steps.append({"type": "normalize"})
@@ -666,6 +779,11 @@ class MockAIService(AIService):
                 "column": "data",
                 "operator": "month_year",
                 "value": f"{year_match.group(0) if year_match else 'current'}-{months[month_match.group(1)]}",
+                "condition": (
+                    f"month(data)={int(months[month_match.group(1)])}"
+                    if not year_match
+                    else f"month_year(data)={year_match.group(0)}-{months[month_match.group(1)]}"
+                ),
             })
         company_match = re.search(r"empresa\s+(?:=|igual a)?\s*(\d+)", prompt)
         if company_match:
@@ -674,6 +792,7 @@ class MockAIService(AIService):
                 "column": "empresa",
                 "operator": "equals",
                 "value": company_match.group(1),
+                "condition": f"empresa={company_match.group(1)}",
             })
         if mentions(prompt, "join"):
             key_match = re.search(
@@ -685,6 +804,7 @@ class MockAIService(AIService):
                 "type": "join",
                 "left_key": key,
                 "right_key": key,
+                "key": key,
             })
         formula_match = re.search(
             r"(?:criar coluna\s+)?([a-zà-ú][\wà-ú]*)\s*(?:=|:)\s*([a-zà-ú][\wà-ú]*\s*[+\-*/]\s*[a-zà-ú][\wà-ú]*)|calcular\s+([a-zà-ú][\wà-ú]*)\s*:\s*([a-zà-ú][\wà-ú]*\s*[+\-*/]\s*[a-zà-ú][\wà-ú]*)",
@@ -704,15 +824,55 @@ class MockAIService(AIService):
                 "column": "margem",
                 "formula": "",
             })
-        if "resumo" in prompt or "agrupar" in prompt or "totalizar" in prompt:
+        drop_columns_match = re.search(
+            r"(?:remov(?:er|a)|exclu(?:ir|a))\s+(?:as\s+)?colunas?\s+(.+?)(?:\.|$)",
+            prompt,
+        )
+        if drop_columns_match:
+            columns = [
+                item.strip()
+                for item in re.split(r"\s*(?:,| e )\s*", drop_columns_match.group(1))
+                if item.strip()
+            ]
+            steps.append({"type": "drop_columns", "columns": columns})
+        rename_match = re.search(
+            r"renome(?:ar|ie)\s+([\wà-ú]+)\s+para\s+([\wà-ú]+)",
+            prompt,
+        )
+        if rename_match:
+            steps.append({
+                "type": "rename_columns",
+                "mapping": {rename_match.group(1): rename_match.group(2)},
+            })
+        fill_nulls_match = re.search(
+            r"(?:preencher|substituir)\s+nulos(?:\s+com\s+([^.,]+))?",
+            prompt,
+        )
+        if fill_nulls_match:
+            parameters = {}
+            if fill_nulls_match.group(1):
+                parameters["value"] = fill_nulls_match.group(1).strip()
+            steps.append({"type": "fill_nulls", **parameters})
+        if mentions(prompt, "sort"):
+            sort_match = re.search(r"(?:ordenar|ordenado)\s+por\s+([\wà-ú]+)", prompt)
+            steps.append({
+                "type": "sort",
+                "column": sort_match.group(1) if sort_match else None,
+            })
+        if (
+            "resumo" in prompt
+            or "agrupar" in prompt
+            or "agrupe por" in prompt
+            or "totalizar" in prompt
+        ):
             steps.append({
                 "type": "aggregate",
                 "group_by": "empresa" if "empresa" in prompt else "cliente",
             })
         if reconciliation:
-            steps.append({"type": "reconcile"})
+            steps.append({"type": "reconcile", "key": "documento"})
         elif mentions(prompt, "reconcile"):
-            steps.append({"type": "reconcile"})
+            steps.append({"type": "reconcile", "key": "documento"})
         if mentions(prompt, "validate"):
             steps.append({"type": "validate"})
         if mentions(prompt, "export"):

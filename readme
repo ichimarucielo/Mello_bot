@@ -1,14 +1,14 @@
 # MELLO BOT
 
-Plataforma para criação, governança, execução e monitoramento de ETLs orientados por manifestos.
+Plataforma para criação, governança, execução e monitoramento de ETLs orientados por manifesto.
 
 ## Visão geral
 
 O MELLO BOT é uma camada operacional para ETLs que recebem arquivos, validam entradas, executam um processamento externo e produzem artefatos de saída. O objetivo principal é evitar que cada ETL tenha que implementar sua própria UI de upload, validação, histórico, diagnóstico e governança.
 
-O repositório não é o ETL de negócio em si. Ele é a plataforma de execução e controle. O núcleo em `core/` organiza a descoberta de projetos, o contrato com o manifesto, o fluxo de validação, a execução do ETL externo, o registro do histórico e a verificação de outputs.
+O repositório não é o ETL de negócio em si. Ele é a plataforma de execução e controle. O núcleo em `core/` organiza a descoberta de projetos, o contrato com o manifesto, o fluxo de validação, a execução do ETL externo, o registro do histórico e a verificação de outputs. Sobre esse núcleo, o **MELLO AI / Automation Designer** interpreta um pedido em linguagem natural e gera manifesto, scaffold e `README.md` de um novo projeto.
 
-A lógica de negócio dos ETLs fica em projetos externos, referenciados pelos manifestos em `manifests/`.
+A lógica de negócio dos ETLs fica em projetos externos (ou em scaffolds gerados em `projects/`), referenciados pelos manifestos em `manifests/`.
 
 ## Estado do projeto
 
@@ -19,30 +19,33 @@ Funcionalidades implementadas:
 - descoberta automática de projetos por manifestos YAML
 - identificação de arquivos por estrutura de colunas
 - validação de input, extensão e colunas obrigatórias
-- execução de script de ETL por subprocesso
+- execução de script de ETL por subprocesso, com timeout configurável
 - validação de outputs esperados
-- histórico e persistência em SQLite
-- diagnóstico operacional do ambiente
+- histórico e persistência em SQLite (com migração automática de logs JSON legados)
+- diagnóstico operacional do ambiente (`/health` e `/health/details`)
 - geração de manifesto e scaffold inicial de projeto
+- **MELLO AI**: análise de prompt, catálogo de documentos conhecidos, validação de pipeline declarativo e geração de projeto completo por padrão (genérico, conciliação, consolidação, Power BI, antifraude, validação)
 - dashboard em Streamlit e API REST em FastAPI
 
 Limitações conhecidas:
 
 - não existe autenticação ou autorização
-- não há fila distribuída, queue ou workers assíncronos em produção
+- não há fila distribuída, queue ou workers assíncronos em produção (execução assíncrona usa `BackgroundTasks` do FastAPI)
 - execução local e single-process
-- os ETLs reais estão fora do repositório e precisam existir em `project_path`
+- os ETLs reais podem ficar fora do repositório e precisam existir em `project_path`
 - a validação de arquivos aceita CSV e XLSX; XLS ainda aparece em alguns fluxos, mas não é totalmente suportado pelo validador
+- o `MockAIService` é um analisador determinístico local; não há integração com um provedor de IA real (Azure OpenAI, OpenAI etc.) nesta versão
 
 ## Quem usa o sistema
 
 O ecossistema é composto por:
 
-- `frontend/app.py`: interface Streamlit para operação do operador
+- `frontend/app.py`: interface Streamlit para operação do operador (visão geral, MELLO AI, projetos, execuções, histórico, outputs, administração e diagnóstico)
 - `api/app.py`: API REST para integração e automação
-- `core/`: regra de negócio, validação, execução e persistência
+- `core/`: regra de negócio, validação, execução, persistência e motor de IA de automações
 - `manifests/*.yaml`: contratos que definem cada ETL
-- projetos externos: ETLs reais, frequentemente em diretórios paralelos ao repo
+- `knowledge/`: playbook e padrões de domínio usados como referência (por pessoas e por agentes de IA)
+- projetos externos ou gerados em `projects/`: ETLs reais, frequentemente em diretórios paralelos ao repositório
 
 ## Modelo de negócio da plataforma
 
@@ -53,10 +56,14 @@ Cada manifesto define:
 - `id`: identificador do projeto
 - `name`: nome visual
 - `category`: categoria operacional
-- `project_path`: caminho do projeto ETL externo
+- `description`: descrição do que o projeto faz
+- `project_path`: caminho do projeto ETL (externo ou gerado em `projects/`)
+- `timeout_seconds`: tempo máximo de execução do ETL (padrão 1800s)
 - `entrypoint.script`: script que será executado
-- `required_files`: arquivos esperados e regras de validação
+- `required_files`: arquivos esperados e regras de validação (`accepted_extensions`, `required_columns`, `critical_columns`, `cli_argument`)
+- `steps`: lista opcional de passos de um pipeline declarativo (normalize, join, filter, aggregate, reconcile, export etc.), usada pelo MELLO AI
 - `outputs`: artefatos esperados após a execução
+- `tags`: rótulos livres para categorização
 
 Esse contrato permite que novos ETLs sejam integrados sem alterar a base de código do orquestrador.
 
@@ -79,67 +86,137 @@ Manifest  Inputs  ETL externo
                   |
                   v
         ExecutionLogger / HistoryService
+
+MELLO AI (paralelo, gera manifesto + scaffold)
+Prompt -> AutomationDesigner -> AIService (MockAIService)
+                                   |
+                     DocumentCatalog / GenericDocumentDetector / PipelineCatalog
+                                   |
+                                   v
+                        AutomationAnalysis -> ManifestGenerator -> PipelineValidator
+                                   |
+                                   v
+                        ProjectScaffolder + TemplateEngine -> projeto + README + manifest
 ```
 
-### Fluxo principal
+### Fluxo principal (execução)
 
 1. `Registry` carrega os manifestos do diretório `manifests/`.
 2. O usuário seleciona um projeto na interface ou via API.
 3. Os arquivos são recebidos e mapeados no `UploadMapper`.
 4. O `Validator` verifica extensão, presença e colunas obrigatórias.
-5. O `Executor` prepara os argumentos e dispara o ETL externo em subprocesso.
+5. O `Executor` prepara os argumentos e dispara o ETL externo em subprocesso, respeitando `timeout_seconds`.
 6. O `OutputValidator` confirma se os arquivos esperados foram gerados.
 7. O `ExecutionLogger` grava status, duração, arquivos e outputs em `storage/mello.db`.
 8. O histórico é lido por `HistoryService` para exibição em telas e APIs.
+
+### Fluxo do MELLO AI (criação assistida)
+
+1. O usuário descreve o que precisa em linguagem natural (ex.: "recebo um Excel de faturamento e preciso comparar com SAP").
+2. `AutomationDesigner.analyze` delega ao `AIService` (implementação atual: `MockAIService`).
+3. O `MockAIService` usa `DocumentCatalog` (documentos conhecidos em `knowledge/documents/`) e `GenericDocumentDetector` (papéis de arquivo descritos livremente) para identificar entradas, além de `pipeline_catalog.mentions` para detectar operações (normalizar, cruzar, agregar, conciliar etc.).
+4. O resultado é uma `AutomationAnalysis` com diagnóstico, viabilidade, inputs, outputs, passos (`steps`) e um `manifest_data` sugerido.
+5. `ManifestGenerator` valida os dados como `Manifest` e o `PipelineValidator` verifica coerência estrutural dos `steps` (ex.: join exige duas entradas, aggregate exige `group_by`).
+6. `ProjectScaffolder.create_automation_project` gera o projeto usando o template correspondente ao `pattern` (genérico, conciliação, consolidação, Power BI, antifraude ou validação).
+7. O manifesto gerado é publicado em `manifests/<project_id>.yaml`, tornando o projeto imediatamente disponível para execução normal.
+
+### Ciclo completo de uma automação gerada
+
+Toda automação criada pelo MELLO AI segue este ciclo:
+
+1. **Receber**: o usuário descreve o processo e os arquivos esperados.
+2. **Analisar**: o designer identifica documentos, operações, chaves e outputs.
+3. **Revisar**: o usuário pode editar nome, etapas, formato de entrega e outputs.
+4. **Aprovar**: a criação do projeto exige aprovação humana explícita do Execution Plan.
+5. **Gerar**: o manifesto é validado e o scaffold cria `main.py`, `README.md` e `manifest.yaml`.
+6. **Executar**: os inputs são validados e o entrypoint é regenerado a partir do manifesto antes do subprocesso.
+7. **Confirmar**: o `OutputValidator` verifica todos os outputs declarados antes de reportar sucesso.
+8. **Disponibilizar**: os arquivos encontrados aparecem no histórico e na área de Outputs.
+
+O manifesto é a fonte de verdade do projeto. Isso permite corrigir ou atualizar um pipeline sem depender de um `main.py` antigo. O executor também recria automaticamente o entrypoint gerenciado quando necessário, usando o `pattern` salvo no manifesto.
+
+Para análises com múltiplos resultados, o usuário pode escolher entre:
+
+- **outputs separados**, gerando um arquivo por análise;
+- **workbook único**, gerando um `.xlsx` com uma aba para cada análise.
+
+Os campos opcionais usados para isso são:
+
+```yaml
+pattern: reconciliation
+output_mode: workbook
+workbook_name: relatorio_analitico.xlsx
+workbook_sheets:
+  - resumo_executivo.xlsx
+  - nfs_perdidas.xlsx
+  - nfs_novas.xlsx
+```
+
+O endpoint legado `/execute/{project_id}` também valida os outputs antes de retornar sucesso. A execução por upload usa o mesmo `Orchestrator`, `Executor` e `OutputValidator`.
 
 ## Estrutura do repositório
 
 ```text
 mello_bot/
 ├── api/
-│   ├── app.py                 # FastAPI: endpoints e integrações
-│   └── schemas.py             # modelos de resposta da API
+│   ├── app.py                    # FastAPI: endpoints de execução, projetos e IA
+│   └── schemas.py                # modelos de resposta da API
 ├── core/
-│   ├── column_normalizer.py   # normalização de colunas para matching
-│   ├── enums.py               # enums de domínio e status
-│   ├── execution_logger.py    # persistência de execuções
-│   ├── execution_repository.py# camada de armazenamento do histórico
-│   ├── execution_service.py   # staging, criação e execução async
-│   ├── executor.py            # execução de subprocesso do ETL
-│   ├── exceptions.py          # erros de domínio
-│   ├── file_manager.py        # manipulação de uploads e arquivos
-│   ├── health_service.py      # diagnósticos do sistema
-│   ├── history_service.py     # leitura do histórico
-│   ├── identifier.py          # identificação por colunas
-│   ├── manifest_generator.py  # geração e versionamento de manifestos
-│   ├── manifest_loader.py     # carregamento de manifestos YAML
-│   ├── models.py              # modelos Pydantic e DTOs
-│   ├── orchestrator.py        # coordenação do fluxo principal
-│   ├── output_validator.py    # validação de outputs esperados
-│   ├── project_scaffolder.py  # scaffold de novos projetos
-│   ├── registry.py            # leitura de projetos
-│   ├── settings.py            # caminhos de execução
-│   ├── template_engine.py     # template de projeto ETL
-│   ├── upload_mapper.py       # associação entre uploads e arquivos esperados
-│   ├── validator.py           # validação dos arquivos de entrada
-│   └── ...
+│   ├── ai_service.py              # AIService (contrato) e MockAIService (analisador determinístico)
+│   ├── automation_designer.py     # orquestra análise -> manifesto -> scaffold
+│   ├── column_normalizer.py       # normalização de colunas para matching
+│   ├── document_catalog.py        # catálogo de documentos conhecidos (knowledge/documents/*.yaml)
+│   ├── document_engine.py         # DocumentDefinition, FileEntity e matcher de documentos
+│   ├── enums.py                   # enums de domínio e status
+│   ├── execution_logger.py        # persistência de execuções
+│   ├── execution_repository.py    # camada de armazenamento do histórico (SQLite)
+│   ├── execution_service.py       # staging, criação e execução assíncrona
+│   ├── executor.py                # execução de subprocesso do ETL, com timeout
+│   ├── exceptions.py              # erros de domínio
+│   ├── file_manager.py            # manipulação de uploads e arquivos
+│   ├── generic_document_detector.py # detecção de papéis de arquivo descritos em texto livre
+│   ├── health_service.py          # diagnósticos do sistema
+│   ├── history_service.py         # leitura do histórico
+│   ├── identifier.py              # identificação de arquivo por estrutura de colunas
+│   ├── logger.py                  # logging estruturado e eventos de automação
+│   ├── manifest_generator.py      # geração, validação e versionamento de manifestos
+│   ├── manifest_loader.py         # carregamento de manifestos YAML
+│   ├── models.py                  # modelos Pydantic e DTOs
+│   ├── orchestrator.py            # coordenação do fluxo principal
+│   ├── output_validator.py        # validação de outputs esperados
+│   ├── pipeline_catalog.py        # operações de pipeline reconhecidas em prompts (join, aggregate...)
+│   ├── pipeline_validator.py      # validação estrutural de pipelines declarativos (steps)
+│   ├── project_scaffolder.py      # scaffold de novos projetos a partir de templates
+│   ├── registry.py                # leitura de projetos
+│   ├── settings.py                # caminhos base (manifests, inputs, logs, storage)
+│   ├── template_engine.py         # renderização dos templates Jinja2 de projeto ETL
+│   ├── upload_mapper.py           # associação entre uploads e arquivos esperados
+│   └── validator.py               # validação dos arquivos de entrada
 ├── frontend/
-│   └── app.py                 # Streamlit
-├── manifests/
-│   ├── ia_quarteto.yaml
-│   └── antifraude.yaml
-├── projects/                  # scaffolds locais criados pela plataforma
-├── inputs/                    # entradas por projeto
-├── logs/                      # logs JSON e compatibilidade
-├── storage/                   # SQLite e artefatos persistentes
-├── tests/                     # testes automatizados
+│   └── app.py                     # Streamlit: Visão geral, MELLO AI, Projetos, Execuções, Histórico, Outputs, Administração, Diagnóstico
+├── templates/                      # templates Jinja2 usados pelo scaffold (genérico, conciliação, consolidação, Power BI, antifraude, validação)
+├── knowledge/
+│   ├── 01_MELLO_BOT_PLAYBOOK.md
+│   ├── 02_MANIFEST_PATTERNS.md
+│   ├── 03_ERROR_PATTERNS.md
+│   ├── 04_DOMAIN_PATTERNS.md
+│   ├── 05_REPORT_PATTERNS.md
+│   └── documents/                  # catálogo de documentos conhecidos (billing, fs10n, prefeitura, vendas...)
+├── manifests/                       # contratos YAML de cada projeto
+├── projects/                        # scaffolds gerados/mantidos localmente pela plataforma
+├── inputs/                          # entradas por projeto
+├── logs/                            # logs JSON legados (migrados para SQLite)
+├── storage/                         # SQLite (`mello.db`) e artefatos persistentes
+├── tests/                           # testes automatizados (pytest)
 ├── scripts/
 │   ├── setup_windows.bat
-│   └── start_mello_bot.bat
-├── main.py                    # utilitário de exemplo
-├── requirements.txt
-├── readme                     # documentação do projeto
-└── Dockerfile                 # imagem/container opcional
+│   ├── start_mello_bot.bat
+│   └── start_mello_bot_api.bat
+├── main.py                          # utilitário de exemplo (uso do Identifier)
+├── requirements.txt                 # dependências completas (API + Streamlit)
+├── requirements-api.txt             # dependências mínimas para rodar só a API
+├── readme                           # este documento
+└── Dockerfile                       # imagem para a API
 ```
 
 ## Manifestos: contrato do sistema
@@ -192,25 +269,40 @@ outputs:
 | `id` | identificador único do projeto |
 | `name` | nome mostrável para usuário |
 | `category` | categoria da operação |
-| `project_path` | caminho do ETL externo, relativo à raiz do repositório |
+| `description` | descrição funcional do projeto |
+| `project_path` | caminho do ETL, relativo à raiz do repositório (externo ou em `projects/`) |
+| `timeout_seconds` | tempo máximo de execução em segundos (padrão `1800`) |
 | `entrypoint.script` | script executado pelo `Executor` |
 | `required_files` | arquivos esperados e regras de validação |
-| `accepted_extensions` | extensões aceitas para cada input |
+| `accepted_extensions` | extensões aceitas para cada input (`csv` ou `xlsx`) |
 | `required_columns` | colunas mínimas exigidas |
+| `critical_columns` | subconjunto de colunas usado para identificação/matching mais estrito |
 | `cli_argument` | parâmetro de linha de comando usado para passar o arquivo |
+| `steps` | pipeline declarativo opcional (usado pelo MELLO AI para representar a transformação sugerida) |
 | `outputs` | outputs esperados após execução |
+| `pattern` | template de execução usado pelo scaffold (`generic`, `reconciliation`, `consolidation`, `powerbi`, `antifraud` ou `validation`) |
+| `output_mode` | formato de entrega: `separate` ou `workbook` |
+| `workbook_name` | nome do arquivo quando `output_mode` é `workbook` |
+| `workbook_sheets` | nomes das análises que serão representadas como abas do workbook |
 | `output_folder` | pasta opcional de outputs, quando diferente de `data/output` |
+| `tags` | rótulos livres |
 
 ## Manifestos do workspace atual
 
-Atualmente o sistema reconhece dois projetos principais:
+O diretório `manifests/` reúne os projetos reconhecidos pela plataforma:
 
-| Projeto | Caminho esperado | Entrypoint | Arquivos esperados | Outputs esperados |
-| --- | --- | --- | --- | --- |
-| `ia_quarteto` | `../IA_QUARTETO` | `main.py` | `prefeitura.csv`, `fs10n.xlsx`, `zsd008.xlsx` | `Check_Faturamento.xlsx`, `Report_Faturamento.xlsx` |
-| `antifraude` | `../Antifraude_etl` | `src/main.py` | `base_antifraude.xlsx` | `antifraude_vf.xlsx` |
+| Manifesto | Categoria | `project_path` |
+| --- | --- | --- |
+| `ia_quarteto.yaml` | faturamento | `../IA_QUARTETO` |
+| `antifraude.yaml` | antifraude | `../Antifraude_etl` (ou `projects/antifraude`, se gerado localmente) |
+| `conciliacao_fbl5n.yaml` | conciliação | `projects/conciliacao_fbl5n` |
+| `conciliacao_contas_pagar_receber.yaml` | conciliação | conforme definido no manifesto |
+| `conciliacao_fs10n_billing.yaml` | conciliação | conforme definido no manifesto |
+| `consolidacao_dados.yaml` | consolidação | conforme definido no manifesto |
+| `dataset_power_bi.yaml` | Power BI | `projects/dataset_power_bi` |
+| `automacao.yaml` | operacional | scaffold de exemplo gerado pelo MELLO AI |
 
-Importante: os caminhos acima são externos ao repositório. Isso significa que a plataforma só funciona end-to-end quando os projetos reais existem nos diretórios correspondentes, com dependências instaladas e com outputs gerados nas pastas esperadas.
+Importante: quando `project_path` aponta para fora do repositório, a plataforma só funciona de ponta a ponta se o projeto real existir no caminho correspondente, com dependências instaladas e outputs gerados na pasta esperada. Quando o projeto foi criado pelo MELLO AI, ele já nasce dentro de `projects/<id>/` e funciona imediatamente com o `main.py` gerado (que ainda precisa da regra de negócio implementada).
 
 ## Como rodar localmente
 
@@ -222,7 +314,16 @@ No Windows:
 scripts\setup_windows.bat
 ```
 
-Isso cria um ambiente virtual em `.venv` e instala as dependências.
+Isso cria um ambiente virtual em `.venv` (usando o launcher `py`) e instala as dependências de `requirements.txt`. Se o launcher `py` não estiver disponível, crie o ambiente manualmente:
+
+```bash
+python -m venv .venv
+python -m pip install -r requirements.txt
+```
+
+Para rodar somente a API, `requirements-api.txt` traz um conjunto reduzido de dependências (sem Streamlit).
+
+Além das dependências deste repositório, cada ETL externo pode ter um `requirements.txt` próprio, que não é instalado automaticamente.
 
 ### 2) Iniciar a interface Streamlit
 
@@ -232,32 +333,41 @@ scripts\start_mello_bot.bat
 
 ou diretamente:
 
-```bat
-.venv\Scripts\activate.bat
-python -m streamlit run frontend\app.py
+```bash
+.venv\Scripts\activate
+streamlit run frontend/app.py
 ```
 
 ### 3) Iniciar a API FastAPI
 
 ```bat
-.venv\Scripts\activate.bat
-uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Ou, no Windows, use o script dedicado:
-
-```bat
 scripts\start_mello_bot_api.bat
 ```
 
-O `start_mello_bot.bat` inicia somente o Streamlit. Para usar a interface e a
-API ao mesmo tempo, abra dois terminais na raiz do projeto e execute um script
-em cada terminal.
+ou diretamente:
+
+```bash
+.venv\Scripts\activate
+uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+O `start_mello_bot.bat` inicia somente o Streamlit. Para usar a interface e a API ao mesmo tempo, abra dois terminais na raiz do projeto e execute um script em cada terminal.
+
+Execute os comandos a partir da raiz do repositório, pois o carregamento dos manifestos usa o caminho relativo `manifests/`.
 
 ### 4) Verificar saúde da API
 
 ```bash
 curl http://localhost:8000/health
+curl http://localhost:8000/health/details
+```
+
+### 5) Rodar o exemplo utilitário
+
+O `main.py` não inicia a API nem o Streamlit. Ele contém um exemplo de uso do `Identifier`, mas possui um caminho absoluto de exemplo (`C:\dev\IA_QUARTETO\...`); ajuste esse caminho antes de executá-lo:
+
+```bash
+python main.py
 ```
 
 ## Endpoints principais da API
@@ -265,15 +375,18 @@ curl http://localhost:8000/health
 | Método | Rota | Finalidade |
 | --- | --- | --- |
 | GET | `/health` | verifica disponibilidade |
+| GET | `/health/details` | diagnóstico detalhado de manifestos, `project_path`, entrypoint e outputs |
 | GET | `/projects` | lista projetos carregados |
 | GET | `/projects/{project_id}` | busca um projeto |
-| GET | `/projects/{project_id}/outputs` | lista outputs existentes |
 | GET | `/projects/{project_id}/outputs/{file_name}` | baixa um output |
 | GET | `/executions` | lista execuções |
 | GET | `/executions/{execution_id}` | consulta uma execução |
-| POST | `/executions` | cria execução pendente |
-| POST | `/executions/{execution_id}/files` | recebe arquivos e agenda execução |
-| GET | `/executions/{execution_id}/outputs` | lista outputs da execução |
+| POST | `/executions` | cria execução pendente para um projeto |
+| POST | `/executions/{execution_id}/files` | recebe arquivos e agenda a execução em background |
+| GET | `/executions/{execution_id}/outputs` | lista outputs gerados pela execução |
+| POST | `/ai/analyze` | analisa um prompt e retorna diagnóstico, viabilidade, inputs, outputs e complexidade |
+| POST | `/ai/manifest` | retorna o manifesto YAML sugerido para um prompt |
+| POST | `/ai/create-project` | cria o scaffold completo (manifesto + projeto + README) a partir de um prompt ou de um manifesto já revisado |
 
 Fluxo de execução assíncrona recomendado:
 
@@ -290,6 +403,68 @@ curl -X POST http://localhost:8000/executions/EXECUTION_ID/files \
 curl http://localhost:8000/executions/EXECUTION_ID
 ```
 
+Fluxo de criação assistida (MELLO AI):
+
+```bash
+curl -X POST http://localhost:8000/ai/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Recebo um Excel de faturamento e preciso comparar com SAP para encontrar divergencias."}'
+
+curl -X POST http://localhost:8000/ai/create-project \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Recebo um Excel de faturamento e preciso comparar com SAP para encontrar divergencias."}'
+```
+
+## MELLO AI / Automation Designer
+
+O Automation Designer adiciona uma camada de criação assistida por IA sem alterar o fluxo existente de execução. Ele recebe um requisito em linguagem natural, produz uma análise estruturada, gera um manifesto validado e pode criar um scaffold de projeto usando `ManifestGenerator`, `ProjectScaffolder` e `TemplateEngine`.
+
+Componentes envolvidos:
+
+- **`AIService` / `MockAIService`**: contrato de análise e implementação determinística atual. `MockAIService` reconhece termos de domínio (SAP, faturamento, contas a pagar/receber, antifraude, Power BI, conciliação, consolidação, validação) e não depende de nenhum provedor externo de IA.
+- **`DocumentCatalog`**: carrega definições de documentos conhecidos a partir de `knowledge/documents/*.yaml` (ex.: `billing`, `fs10n`, `prefeitura`, `vendas`, `zsd008`, `em_aberto`, `cadastro_clientes`, `recebimento`), incluindo aliases, extensões aceitas e colunas críticas.
+- **`GenericDocumentDetector`**: identifica papéis de arquivo descritos livremente no prompt (ex.: "planilha de vendas", "arquivo de clientes") quando o documento não está no catálogo.
+- **`pipeline_catalog`**: reconhece operações mencionadas no prompt (normalizar, remover nulos, deduplicar, filtrar, cruzar, calcular, agrupar, validar, exportar, conciliar) e as traduz em `steps`.
+- **`PipelineValidator`**: valida a coerência estrutural dos `steps` gerados (ex.: `join`/`reconcile` exigem ao menos duas entradas, `aggregate` exige `group_by`, `calculate` exige `column` e `formula`, todo pipeline com `steps` exige ao menos um `output`).
+
+Nenhuma dependência externa de IA é instalada por esta camada; a abstração `AIService` permite adicionar Azure OpenAI, OpenAI, Copilot Studio ou outro provedor sem acoplar o Designer a um fornecedor específico.
+
+### Padrões de projeto (`pattern`)
+
+O `ProjectScaffolder.create_automation_project` escolhe o template em `templates/` de acordo com o `pattern` identificado na análise:
+
+| Pattern | Template | Uso típico |
+| --- | --- | --- |
+| `generic` | `generic_main.py.j2` | automação simples, sem padrão específico identificado |
+| `reconciliation` | `reconciliation_main.py.j2` | comparação entre duas ou mais fontes (ex.: SAP x Prefeitura) |
+| `consolidation` | `consolidation_main.py.j2` | agrupamento/unificação de múltiplas bases |
+| `powerbi` | `powerbi_main.py.j2` | geração de dataset para Power BI |
+| `antifraud` | `antifraud_main.py.j2` | fluxos de risco e antifraude |
+| `validation` | `validation_main.py.j2` | validação de dados sem transformação de negócio |
+
+O scaffold gerado contém um `README.md` com objetivo, inputs, outputs, forma de execução, estrutura e critérios de aceite. O `main.py` gerado usa `argparse`, logging, valida a existência dos arquivos recebidos e deixa TODOs explícitos para a regra de negócio — ele não inventa transformações.
+
+O resultado do Designer deve ser tratado como ponto de partida: colunas, argumentos CLI, caminhos, outputs e regras do ETL precisam ser confirmados antes de uma execução de produção.
+
+### Compatibilidade
+
+Os métodos existentes continuam sendo usados da mesma forma. A criação assistida utiliza `ProjectScaffolder.create_automation_project`; `ProjectScaffolder.create` e `TemplateEngine.render_main` permanecem retrocompatíveis. O fluxo de upload, validação, execução, histórico e outputs não depende do MELLO AI.
+
+## Interface Streamlit
+
+A navegação do `frontend/app.py` é composta pelas seguintes seções:
+
+| Seção | Finalidade |
+| --- | --- |
+| Visão geral | resumo do estado da plataforma e atalhos |
+| MELLO AI | criação assistida de automações a partir de um prompt |
+| Projetos | catálogo de projetos carregados via manifesto |
+| Execuções | upload de arquivos e disparo de execução de um ETL |
+| Histórico | consulta ao histórico de execuções |
+| Outputs | download de artefatos gerados |
+| Administração | visualização e validação de manifestos existentes |
+| Diagnóstico | saúde do ambiente (`HealthService.diagnose`) |
+
 ## Dados e persistência
 
 A persistência atual é local:
@@ -301,9 +476,37 @@ A persistência atual é local:
 
 O `ExecutionLogger` e `HistoryService` são os pontos de leitura para o dashboard e a API.
 
-## Criação de projetos
+### Banco SQLite
 
-A área de criação dentro do Streamlit usa a lógica de geração de manifesto e scaffold:
+O banco padrão é `storage/mello.db`. O schema contém:
+
+| Tabela | Responsabilidade |
+| --- | --- |
+| `projects` | Catálogo básico dos projetos persistidos. |
+| `executions` | Status, duração, timestamps, usuário, erro e payload da execução. |
+| `execution_files` | Arquivos enviados em cada execução. |
+| `execution_outputs` | Outputs encontrados em cada execução. |
+
+O `SQLiteExecutionRepository` aceita uma pasta de logs legados e migra arquivos JSON de forma idempotente. O payload devolvido pelo histórico continua compatível com a API existente.
+
+Cada execução gera um registro estruturado semelhante a:
+
+```json
+{
+  "execution_id": "20260903_102145",
+  "project_id": "antifraude",
+  "status": "success",
+  "duration_seconds": 3.61,
+  "outputs": ["antifraude_vf.xlsx"],
+  "uploaded_files": ["base.xlsx"]
+}
+```
+
+Os status usados pelo domínio incluem `pending`, `running`, `success`, `partial`, `failed`.
+
+## Criação manual de projetos (sem IA)
+
+Além do MELLO AI, a área de criação dentro do Streamlit permite montar um manifesto manualmente:
 
 1. o usuário envia um arquivo de exemplo
 2. as colunas são extraídas
@@ -336,9 +539,35 @@ O validador lê arquivos CSV e XLSX. O comportamento atual é:
 - a validação é feita pela presença das colunas exigidas, ignorando o nome do arquivo
 - o projeto só é aceito quando todos os arquivos obrigatórios atendem ao contrato
 
+## Validações e hardening
+
+O runtime trata, entre outros casos:
+
+- CSV vazio ou sem colunas
+- XLSX corrompido ou ilegível
+- manifesto inválido
+- projeto ou entrypoint inexistente
+- arquivo obrigatório ausente
+- extensão não suportada pelo leitor (`csv` e `xlsx`)
+- colunas obrigatórias ausentes
+- output não gerado ou divergente do manifesto
+- timeout de execução do ETL externo
+- tentativa de excluir o diretório raiz do projeto
+
+Falhas de entrada são identificadas antes da execução sempre que possível, evitando disparar ETLs com contratos incompletos.
+
+## Limitações e cuidados operacionais
+
+- Não há autenticação ou autorização; qualquer processo com acesso à API pode tentar executar projetos e baixar outputs.
+- A execução usa `sys.executable` e subprocesso local, com o diretório de trabalho do ETL externo.
+- Os manifestos e os ETLs são código/configuração confiáveis da instalação; não se deve permitir edição livre por usuários não confiáveis.
+- O download de outputs deve ser usado apenas com nomes declarados no manifesto e com uma instalação protegida, pois a API é local e ainda não oferece uma camada de autorização.
+- O frontend mostra a administração de manifestos, mas a persistência de uma nova versão não altera automaticamente todos os artefatos ou dependências do ETL externo.
+- Os diretórios `inputs/`, `logs/` e `storage/` são dados operacionais locais. Podem conter arquivos potencialmente sensíveis e não devem ser tratados como código-fonte ou como armazenamento compartilhado entre usuários.
+
 ## Principais dependências
 
-```txt
+```text
 streamlit
 fastapi
 uvicorn
@@ -349,6 +578,42 @@ pydantic
 pyyaml
 python-multipart
 ```
+
+`requirements.txt` inclui Streamlit; `requirements-api.txt` traz apenas o necessário para rodar a API isoladamente.
+
+## Testes
+
+Execute a suíte com:
+
+```bash
+pytest -q
+```
+
+Os testes cobrem carregamento e geração de manifestos, registry, identificação, mapeamento e validação de uploads, executor, orquestrador, validação de outputs, logs, histórico, templates, scaffold, motor de documentos, Automation Designer, timeout e diagnóstico, rotas da API e hardening. A suíte ainda não substitui um teste de integração com os ETLs externos reais.
+
+## Docker
+
+O [Dockerfile](Dockerfile) empacota somente a API FastAPI e o núcleo da plataforma (usa `requirements-api.txt`; o Streamlit não vai para a imagem). Os ETLs continuam externos e precisam ser montados ou disponibilizados no caminho esperado pelos manifestos. Para construir e executar:
+
+```bash
+docker build -t mello-bot-api .
+docker run --rm -p 8000:8000 -v "./storage:/app/storage" mello-bot-api
+```
+
+O volume de `storage/` preserva o SQLite entre reinicializações. Em produção, monte também os diretórios de inputs, logs, manifestos e os projetos externos conforme a topologia da instalação.
+
+## Base de conhecimento (`knowledge/`)
+
+O diretório `knowledge/` documenta os padrões usados tanto por pessoas quanto por agentes de IA que trabalham no repositório:
+
+| Arquivo | Conteúdo |
+| --- | --- |
+| `01_MELLO_BOT_PLAYBOOK.md` | o que o MELLO BOT é e não é, princípios (manifest driven, core first, execução desacoplada, runtime único, rastreabilidade) |
+| `02_MANIFEST_PATTERNS.md` | checklist e padrões para escrever manifestos válidos |
+| `03_ERROR_PATTERNS.md` | erros comuns e como diagnosticá-los |
+| `04_DOMAIN_PATTERNS.md` | padrões de domínio (SAP, faturamento, conciliação etc.) |
+| `05_REPORT_PATTERNS.md` | padrões de geração de relatórios/outputs |
+| `documents/*.yaml` | catálogo de documentos conhecidos consumido pelo `DocumentCatalog` |
 
 ## Próximos passos arquiteturais recomendados
 
@@ -365,8 +630,7 @@ Para o projeto evoluir de forma segura e escalável, os próximos passos mais im
 3. Evoluir a execução de processos
    - isolamento por projeto
    - logs estruturados por execução
-   - timeouts e controle de falha explícito
-   - fila de execução e workers para background robusto
+   - fila de execução e workers para background robusto (substituir `BackgroundTasks` por uma fila persistente)
 
 4. Fortalecer governança e operação
    - autenticação e autorização
@@ -383,240 +647,41 @@ Para o projeto evoluir de forma segura e escalável, os próximos passos mais im
    - validar integração com ETLs externos em CI
    - cobrir regras de mapeamento de uploads e outputs
 
+7. Evoluir o MELLO AI
+   - completar e ampliar os schemas públicos da API de IA
+   - integrar um provedor de IA real (Azure OpenAI ou equivalente) por trás de `AIService`
+   - integrar Power Apps ou outros consumidores externos
+
+## Princípios de projeto
+
+- **Manifest driven:** adicionar um ETL deve exigir principalmente um manifesto, não mudanças no núcleo.
+- **Core first:** regras de negócio pertencem a `core/`, não à API ou ao frontend.
+- **Runtime único:** Pandas, OpenPyXL e Python atendem ao modelo atual sem a complexidade de microsserviços, brokers ou orquestração distribuída.
+- **Execução desacoplada:** o ETL externo conhece seus argumentos e outputs; a plataforma coordena o contrato.
+- **Rastreabilidade:** cada execução possui contexto, status, duração e histórico consultável.
+- **IA como acelerador, não como autoridade:** o MELLO AI propõe manifesto e scaffold; a regra de negócio final é sempre revisada por um humano antes de produção.
+
 ## Observações para IA ou novos integrantes
 
 Se você está entrando no projeto agora, a melhor forma de entender o sistema é seguir este caminho:
 
-1. ler `manifests/*.yaml` para entender o contrato dos projetos
-2. entender `core/orchestrator.py` como centro do fluxo
-3. entender `core/executor.py` como ponto de disparo do ETL externo
-4. entender `api/app.py` e `frontend/app.py` para conhecer os canais de uso
-5. validar caminhos em `core/settings.py` e `project_path` dos manifestos
-6. verificar as regras de `validator.py` antes de criar novos manifestos
+1. ler `knowledge/01_MELLO_BOT_PLAYBOOK.md` para entender os princípios da plataforma
+2. ler `manifests/*.yaml` para entender o contrato dos projetos
+3. entender `core/orchestrator.py` como centro do fluxo de execução
+4. entender `core/executor.py` como ponto de disparo do ETL externo
+5. entender `core/automation_designer.py` e `core/ai_service.py` como centro do fluxo de criação assistida
+6. entender `api/app.py` e `frontend/app.py` para conhecer os canais de uso
+7. validar caminhos em `core/settings.py` e `project_path` dos manifestos
+8. verificar as regras de `validator.py` e `pipeline_validator.py` antes de criar novos manifestos
 
-O projeto é simples, observável e extensível, mas depende de contratos claros e dos projetos externos estarem disponíveis para funcionar de ponta a ponta.
+O projeto é simples, observável e extensível, mas depende de contratos claros e, para os ETLs externos, de esses projetos estarem disponíveis para funcionar de ponta a ponta.
+
+## Licença
+
+Nenhuma licença foi definida neste repositório até o momento.
 
 ## Resumo executivo
 
-O MELLO BOT é uma plataforma de orquestração local para ETLs orientados por manifesto, com dashboard, API e fluxo de execução baseado em contrato. Sua principal força está em padronizar a operação dos ETLs sem acoplar lógica de negócio ao núcleo. Sua principal dependência é a existência dos projetos externos e do manifesto correto.
+O MELLO BOT é uma plataforma de orquestração local para ETLs orientados por manifesto, com dashboard, API, motor de criação assistida por IA e fluxo de execução baseado em contrato. Sua principal força está em padronizar a operação dos ETLs sem acoplar lógica de negócio ao núcleo, e em acelerar a criação de novos projetos a partir de um pedido em linguagem natural. Sua principal dependência é a existência dos projetos externos (ou do scaffold gerado) e do manifesto correto.
 
-Em outras palavras: o projeto central é o motor de governança e execução; os ETLs reais continuam sendo responsáveis pela transformação de dados.
-
-  ```
-
-  Os diretórios `inputs/`, `logs/` e `storage/` são dados operacionais locais. Podem conter arquivos potencialmente sensíveis e não devem ser tratados como código-fonte ou como armazenamento compartilhado entre usuários.
-
-  ## Requisitos e instalação
-
-  - Windows ou ambiente compatível com Python
-  - Python 3.10 ou superior
-
-  Execute os comandos a partir da raiz do repositório, pois o carregamento atual dos manifestos usa o caminho relativo `manifests/`.
-
-  Instalação manual:
-
-  ```bash
-  python -m venv .venv
-  python -m pip install -r requirements.txt
-  ```
-
-  No Windows:
-
-  ```bat
-  scripts\setup_windows.bat
-  ```
-
-  O script cria o ambiente virtual e instala as dependências de `requirements.txt`, incluindo FastAPI, Uvicorn, Streamlit, Pydantic, PyYAML, Pandas, OpenPyXL, xlrd e python-multipart. Atualmente ele usa o launcher `py`; se esse launcher não estiver disponível, crie o ambiente manualmente com `python -m venv .venv` e instale as dependências.
-
-  Além das dependências deste repositório, cada ETL externo pode ter um `requirements.txt` próprio. Essas dependências não são instaladas pelo `scripts\setup_windows.bat`.
-
-  ## Execução
-
-  ### API
-
-  ```bash
-  uvicorn api.app:app --reload --host 0.0.0.0 --port 8000
-  ```
-
-  ### Interface web
-
-  ```bash
-  streamlit run frontend/app.py
-  ```
-
-  No Windows, depois do setup, também é possível executar:
-
-  ```bat
-  scripts\start_mello_bot.bat
-  ```
-
-  O arquivo `main.py` não inicia a API nem o Streamlit. Ele contém um exemplo de uso do identificador de arquivos, mas atualmente possui um caminho absoluto de exemplo (`C:\dev\IA_QUARTETO\...`); ajuste esse caminho antes de executá-lo:
-
-  ```bash
-  python main.py
-  ```
-
-  ## Dados, outputs e histórico
-
-  Inputs enviados são organizados por projeto em `inputs/<project_id>/`. A plataforma passa esses arquivos ao ETL pelos argumentos `cli_argument` do manifesto. Os ETLs devem gerar os artefatos na pasta de output configurada pelo próprio projeto, normalmente `data/output/`.
-
-  Cada execução gera um registro estruturado semelhante a:
-
-  ```json
-  {
-    "execution_id": "20260903_102145",
-    "project_id": "antifraude",
-    "status": "success",
-    "duration_seconds": 3.61,
-    "outputs": ["antifraude_vf.xlsx"],
-    "uploaded_files": ["base.xlsx"]
-  }
-  ```
-
-  Os status usados pelo domínio incluem `pending`, `running`, `success`, `partial_success`, `failed` e `error`. Os registros ficam em `storage/mello.db` e são usados pela API e pelo dashboard. Os JSON existentes em `logs/` são migrados automaticamente quando o repositório SQLite é inicializado e não são apagados. Falhas de validação, mapeamento ou execução são persistidas como `failed` no fluxo assíncrono.
-
-  ### Banco SQLite
-
-  O banco padrão é `storage/mello.db`. O schema contém:
-
-  | Tabela | Responsabilidade |
-  | --- | --- |
-  | `projects` | Catálogo básico dos projetos persistidos. |
-  | `executions` | Status, duração, timestamps, usuário, erro e payload da execução. |
-  | `execution_files` | Arquivos enviados em cada execução. |
-  | `execution_outputs` | Outputs encontrados em cada execução. |
-
-  O `SQLiteExecutionRepository` aceita uma pasta de logs legados e migra arquivos JSON de forma idempotente. O payload devolvido pelo histórico continua compatível com a API existente.
-
-  ## Limitações e cuidados operacionais
-
-  - Não há autenticação ou autorização; qualquer processo com acesso à API pode tentar executar projetos e baixar outputs.
-  - A execução usa `sys.executable` e subprocesso local, com o diretório de trabalho do ETL externo.
-  - Os manifestos e os ETLs são código/configuração confiáveis da instalação; não se deve permitir edição livre por usuários não confiáveis.
-  - O download de outputs deve ser usado apenas com nomes declarados no manifesto e com uma instalação protegida, pois a API é local e ainda não oferece uma camada de autorização.
-  - O frontend mostra a administração de manifestos, mas a persistência de uma nova versão não altera automaticamente todos os artefatos ou dependências do ETL externo.
-
-  ## Validações e hardening
-
-  O runtime trata, entre outros casos:
-
-  - CSV vazio ou sem colunas
-  - XLSX corrompido ou ilegível
-  - manifesto inválido
-  - projeto ou entrypoint inexistente
-  - arquivo obrigatório ausente
-  - extensão não suportada pelo leitor (`csv` e `xlsx`)
-  - colunas obrigatórias ausentes
-  - output não gerado ou divergente do manifesto
-  - tentativa de excluir o diretório raiz do projeto
-
-  Falhas de entrada são identificadas antes da execução sempre que possível, evitando disparar ETLs com contratos incompletos.
-
-  ## Testes
-
-  Execute a suíte com:
-
-  ```bash
-  pytest -q
-  ```
-
-  Os testes cobrem carregamento e geração de manifestos, registry, identificação, mapeamento e validação de uploads, executor, orquestrador, validação de outputs, logs, histórico, templates, scaffold, rotas e hardening. A suíte ainda não substitui um teste de integração com os ETLs externos reais.
-
-  ## Docker
-
-  O [Dockerfile](Dockerfile) empacota somente a API FastAPI e o núcleo da plataforma. Os ETLs continuam externos e precisam ser montados ou disponibilizados no caminho esperado pelos manifestos. Para construir e executar:
-
-  ```bash
-  docker build -t mello-bot-api .
-  docker run --rm -p 8000:8000 -v "./storage:/app/storage" mello-bot-api
-  ```
-
-  O volume de `storage/` preserva o SQLite entre reinicializações. Em produção, monte também os diretórios de inputs, logs, manifestos e os projetos externos conforme a topologia da instalação.
-
-  ## Princípios de projeto
-
-  - **Manifest driven:** adicionar um ETL deve exigir principalmente um manifesto, não mudanças no núcleo.
-  - **Core first:** regras de negócio pertencem a `core/`, não à API ou ao frontend.
-  - **Runtime único:** Pandas, OpenPyXL e Python atendem ao modelo atual sem a complexidade de microsserviços, brokers ou orquestração distribuída.
-  - **Execução desacoplada:** o ETL externo conhece seus argumentos e outputs; a plataforma coordena o contrato.
-  - **Rastreabilidade:** cada execução possui contexto, status, duração e histórico consultável.
-
-  ## Estado e próximos passos
-
-  O MELLO BOT V1 já contempla descoberta de projetos, upload inteligente, validação, execução desacoplada, outputs, histórico, diagnóstico, administração de manifestos e criação automatizada de scaffolds. O comportamento efetivo depende da existência e da compatibilidade dos projetos externos apontados nos manifestos.
-
-  Possíveis evoluções:
-
-  - completar e ampliar os schemas públicos da API
-  - substituir `BackgroundTasks` por uma fila persistente quando houver necessidade de múltiplos workers
-  - integrar Power Apps ou outros consumidores
-  - adicionar Azure OpenAI e assistentes inteligentes para manifestos e diagnóstico
-
-  ## Licença
-
-  Nenhuma licença foi definida neste repositório até o momento.
-
-  ## Automation Designer
-
-  O Automation Designer adiciona uma camada de criacao assistida por IA sem
-  alterar o fluxo existente de execucao. Ele recebe um requisito em linguagem
-  natural, produz uma analise estruturada, gera um manifesto validado e pode
-  criar um scaffold de projeto usando `ManifestGenerator`, `ProjectScaffolder` e
-  `TemplateEngine`.
-
-  ### Fluxo
-
-  ```text
-  Prompt
-    |
-    v
-  AutomationDesigner
-    |
-    v
-  AIService -> AutomationAnalysis
-    |
-    v
-  ManifestGenerator -> Manifest
-    |
-    v
-  ProjectScaffolder -> README.md + manifest.yaml + src/main.py
-  ```
-
-  O provedor atual e `MockAIService`, um analisador local deterministico para
-  desenvolvimento e testes. A abstracao `AIService` permite adicionar Azure
-  OpenAI, OpenAI, Copilot Studio ou outro provedor sem acoplar o Designer a um
-  fornecedor especifico. Nenhuma dependencia externa de IA e instalada por esta
-  camada.
-
-  ### Endpoints de IA
-
-  | Metodo | Rota | Finalidade |
-  | --- | --- | --- |
-  | POST | `/ai/analyze` | Retorna diagnostico, viabilidade, inputs, outputs e complexidade. |
-  | POST | `/ai/manifest` | Retorna o manifesto YAML validado. |
-  | POST | `/ai/create-project` | Cria o scaffold e retorna os artefatos gerados. |
-
-  Exemplo:
-
-  ```json
-  {
-    "prompt": "Recebo um Excel de faturamento e preciso comparar com SAP para encontrar divergencias."
-  }
-  ```
-
-  O scaffold gerado contem um `README.md` com objetivo, inputs, outputs, forma
-  de execucao, estrutura e criterios de aceite. O `main.py` gerado usa
-  `argparse`, logging, valida a existencia dos arquivos recebidos e deixa TODOs
-  explicitos para a regra de negocio. Ele nao inventa transformacoes.
-
-  O resultado do Designer deve ser tratado como um ponto de partida: colunas,
-  argumentos CLI, caminhos, outputs e regras do ETL precisam ser confirmados
-  antes de uma execucao de producao.
-
-  ### Compatibilidade e migracao
-
-  Os metodos existentes continuam sendo usados da mesma forma. A criacao
-  assistida utiliza apenas `ProjectScaffolder.create_automation_project`; o
-  metodo `ProjectScaffolder.create` e o `TemplateEngine.render_main` existentes
-  permanecem retrocompativeis. O fluxo atual de upload, validacao, execucao,
-  historico e outputs nao depende do Automation Designer.
+Em outras palavras: o projeto central é o motor de governança, criação e execução; os ETLs reais continuam sendo responsáveis pela transformação de dados.

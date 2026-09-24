@@ -18,3 +18,4 @@ steps: []
 outputs:
 - dataset.csv
 tags: []
+pattern: powerbi

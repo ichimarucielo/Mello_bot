@@ -1,5 +1,8 @@
 from typing import Any
 
+from core.models import OperationStep
+from core.pipeline_catalog import get_operation
+
 
 class PipelineValidator:
     """Valida a coerência estrutural de um pipeline declarativo."""
@@ -12,25 +15,34 @@ class PipelineValidator:
         errors: list[str] = []
         warnings: list[str] = []
 
-        for step in steps:
-            step_type = step.get("type")
-            if step_type == "join" and len(inputs) < 2:
+        for raw_step in steps:
+            try:
+                step = OperationStep.model_validate(raw_step)
+                definition = get_operation(step.operation)
+            except (TypeError, ValueError) as error:
+                errors.append(str(error))
+                continue
+
+            step_type = step.operation
+            missing = [
+                parameter
+                for parameter in definition.required_parameters
+                if not step.parameters.get(parameter)
+            ]
+            if missing:
                 errors.append(
-                    "Join identificado mas apenas 1 documento foi encontrado. "
+                    f"{step_type} requer: {', '.join(missing)}."
+                )
+            if step_type == "filter" and not (
+                step.parameters.get("condition")
+                or step.parameters.get("column")
+            ):
+                errors.append("filter requer condition ou column.")
+            if step_type in {"join", "reconcile"} and len(inputs) < 2:
+                errors.append(
+                    f"{step_type} identificado mas apenas 1 documento foi encontrado. "
                     "Join requer pelo menos duas entradas."
                 )
-            elif step_type == "reconcile" and len(inputs) < 2:
-                errors.append(
-                    "Reconciliação identificada mas apenas 1 documento foi encontrado. "
-                    "Reconciliação requer pelo menos duas entradas."
-                )
-            elif step_type == "calculate":
-                if not step.get("column") or not step.get("formula"):
-                    errors.append("Fórmula pendente de definição.")
-            elif step_type == "aggregate" and not step.get("group_by"):
-                errors.append("Aggregate requer group_by.")
-            elif step_type == "filter" and not step.get("column"):
-                errors.append("Filter requer column.")
 
         if steps and not outputs:
             errors.append("Pipeline válido requer pelo menos um output.")

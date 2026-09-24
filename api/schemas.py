@@ -1,6 +1,8 @@
 from pydantic import BaseModel
 from typing import Any
 
+from core.models import ExecutionPlan
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -39,6 +41,7 @@ class ExecuteResponse(BaseModel):
     status: str
     project_id: str
     files: dict[str, str]
+    outputs: list[str] = []
 
 
 class HistoryResponse(BaseModel):
@@ -86,6 +89,7 @@ class AIAnalyzeResponse(BaseModel):
     manifest_data: dict[str, Any] = {}
     understanding: dict[str, Any] = {}
     pipeline_validation: dict[str, Any] = {}
+    execution_plan: dict[str, Any] | ExecutionPlan = {}
 
 
 class AIManifestResponse(BaseModel):
@@ -105,3 +109,4 @@ class AICreateProjectResponse(BaseModel):
 class AICreateProjectRequest(BaseModel):
     prompt: str
     manifest_data: dict[str, Any] | None = None
+    approved: bool = False

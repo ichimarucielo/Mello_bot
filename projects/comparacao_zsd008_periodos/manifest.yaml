@@ -1,0 +1,264 @@
+id: comparacao_zsd008_periodos
+name: Comparacao ZSD008 entre Periodos
+category: risco
+description: 'Recebi dois relatórios ZSD008 do SAP.
+
+
+  Cada relatório representa o faturamento de um período diferente.
+
+
+  Objetivo:
+
+
+  Identificar quais Notas Fiscais deixaram de ser faturadas entre os períodos.
+
+
+  Considere que uma mesma Nota Fiscal pode aparecer mais de uma vez devido à existência
+  de diferentes produtos ou serviços.
+
+
+  Regras de negócio:
+
+
+  1. Utilizar como chave principal de comparação:
+
+
+  - Número da Nota Fiscal
+
+
+  2. Caso existam duplicidades de NF dentro do mesmo relatório:
+
+
+  - Consolidar por Nota Fiscal
+
+  - Somar valores faturados
+
+  - Somar quantidades quando aplicável
+
+  - Agrupar produtos em lista
+
+
+  3. Produzir os seguintes outputs:
+
+
+  ### 1. Resumo Executivo
+
+
+  - Quantidade de NFs no relatório antigo
+
+  - Quantidade de NFs no relatório novo
+
+  - Quantidade de NFs presentes em ambos
+
+  - Quantidade de NFs que deixaram de ser faturadas
+
+  - Quantidade de NFs novas
+
+
+  ### 2. NFs Perdidas
+
+
+  Retornar todas as NFs que existiam no relatório antigo e não existem no relatório
+  novo.
+
+
+  Para cada NF retornar:
+
+
+  - NF
+
+  - Cliente
+
+  - CNPJ
+
+  - Data de emissão
+
+  - Valor faturado
+
+  - Produtos
+
+  - Mês/Ano
+
+
+  ### 3. NFs Novas
+
+
+  Retornar NFs que aparecem no relatório novo mas não estavam no antigo.
+
+
+  ### 4. Análise por Cliente
+
+
+  Agrupar por cliente e retornar:
+
+
+  - Quantidade de NFs perdidas
+
+  - Valor perdido
+
+  - Quantidade de NFs novas
+
+  - Valor novo
+
+  - Saldo líquido
+
+
+  Ordenar por maior impacto financeiro.
+
+
+  ### 5. Análise Mensal
+
+
+  Criar visão mês a mês contendo:
+
+
+  - Mês
+
+  - Quantidade de NFs faturadas
+
+  - Valor faturado
+
+  - Variação percentual de quantidade
+
+  - Variação percentual de valor
+
+
+  ### 6. Top Perdas
+
+
+  Top 20 clientes com maior redução de faturamento.
+
+
+  ### 7. Diagnóstico
+
+
+  Explicar:
+
+
+  - Quais clientes deixaram de faturar
+
+  - Quais clientes reduziram faturamento
+
+  - Quais clientes aumentaram faturamento
+
+  - Possíveis riscos identificados
+
+
+  Regras técnicas:
+
+
+  - Tratar campos monetários corretamente
+
+  - Ignorar diferenças de formatação
+
+  - Ignorar espaços extras
+
+  - Tratar NF como texto para evitar perda de zeros à esquerda
+
+  - Não utilizar aproximações
+
+  - Mostrar os números exatos
+
+
+  No final gerar uma classificação:
+
+
+  🟢 Sem perda relevante
+
+  🟡 Atenção
+
+  🔴 Perda significativa
+
+
+  com justificativa baseada nos valores encontrados.'
+project_path: projects/comparacao_zsd008_periodos
+timeout_seconds: 1800
+entrypoint:
+  script: src/main.py
+required_files:
+- id: zsd008_antigo
+  display_name: ZSD008 Antigo
+  accepted_extensions:
+  - xlsx
+  critical_columns:
+  - Nº Nota Fiscal
+  - Valor Bruto
+  required_columns:
+  - Razão Social
+  - CNPJ
+  cli_argument: --zsd008-antigo
+- id: zsd008_novo
+  display_name: ZSD008 Novo
+  accepted_extensions:
+  - xlsx
+  critical_columns:
+  - Nº Nota Fiscal
+  - Valor Bruto
+  required_columns:
+  - Razão Social
+  - CNPJ
+  cli_argument: --zsd008-novo
+steps:
+- operation: normalize
+  description: ''
+  parameters:
+    key: null
+    group_by: null
+    sum: null
+    collect: null
+    column: null
+    descending: null
+- operation: deduplicate
+  description: ''
+  parameters:
+    key: Número da Nota Fiscal
+    group_by: null
+    sum: null
+    collect: null
+    column: null
+    descending: null
+- operation: aggregate
+  description: ''
+  parameters:
+    key: null
+    group_by: Número da Nota Fiscal
+    sum:
+    - Valor Bruto
+    - Qtde Transação
+    collect: Discriminação
+    column: null
+    descending: null
+- operation: reconcile
+  description: ''
+  parameters:
+    key: Número da Nota Fiscal
+    group_by: null
+    sum: null
+    collect: null
+    column: null
+    descending: null
+- operation: aggregate
+  description: ''
+  parameters:
+    key: null
+    group_by: Razão Social
+    sum: null
+    collect: null
+    column: null
+    descending: null
+- operation: sort
+  description: ''
+  parameters:
+    key: null
+    group_by: null
+    sum: null
+    collect: null
+    column: saldo_liquido
+    descending: true
+outputs:
+- comparação_mes_zsd008.xlsx
+tags: []
+output_mode: workbook
+workbook_sheets:
+- comparação_mes_zsd008.xlsx
+workbook_name: comparação_mes_zsd008.xlsx

@@ -351,6 +351,9 @@ def render_mello_ai_page() -> None:
                     "manifest_data": st.session_state.get(
                         "mello_ai_manifest_data"
                     ),
+                    "approved": bool(
+                        st.session_state.get("mello_ai_approved")
+                    ),
                 },
             )
             st.session_state["mello_ai_project"] = response
@@ -379,6 +382,34 @@ def render_mello_ai_page() -> None:
             f"{understanding.get('operation_count', len(analysis.get('steps', [])))} operações · "
             f"{understanding.get('output_count', len(analysis.get('outputs', [])))} outputs"
         )
+        execution_plan = analysis.get("execution_plan", {})
+        if execution_plan:
+            st.subheader("Execution Plan")
+            st.caption(execution_plan.get("summary", "Plano de execução sugerido."))
+            plan_documents, plan_transformations = st.columns(2)
+            with plan_documents:
+                st.write("**Documentos identificados**")
+                for document in execution_plan.get("documents", []):
+                    st.write(
+                        f"- `{document.get('id', '-')}`: "
+                        f"{document.get('name', '-')} "
+                        f"({document.get('source', '-')}, {document.get('format', '-')})"
+                    )
+            with plan_transformations:
+                st.write("**Transformações**")
+                for transformation in execution_plan.get("transformations", []):
+                    parameters = transformation.get(
+                        "parameters",
+                        transformation.get("details", {}),
+                    )
+                    suffix = f" — {parameters}" if parameters else ""
+                    st.write(
+                        f"{transformation.get('order', '-')}. "
+                        f"{transformation.get('description', transformation.get('label', transformation.get('operation', '-')))}"
+                        f"{suffix}"
+                    )
+            st.write("**Outputs**")
+            st.write(", ".join(execution_plan.get("outputs", [])) or "Nenhum output definido.")
         manifest_data = st.session_state.get("mello_ai_manifest_data", {})
         edited_project_name = st.text_input(
             "Nome do projeto",
@@ -407,6 +438,23 @@ def render_mello_ai_page() -> None:
                     )
         with output_col:
             st.write("**Outputs editáveis**")
+            output_mode = st.radio(
+                "Formato de entrega",
+                options=["separate", "workbook"],
+                format_func=lambda value: (
+                    "Outputs separados"
+                    if value == "separate"
+                    else "Workbook único com abas"
+                ),
+                index=(
+                    1
+                    if manifest_data.get("output_mode") == "workbook"
+                    else 0
+                ),
+                key="mello_ai_output_mode",
+                horizontal=True,
+            )
+            manifest_data["output_mode"] = output_mode
             edited_outputs = st.data_editor(
                 [{"output": output} for output in manifest_data.get(
                     "outputs", analysis.get("outputs", [])
@@ -421,11 +469,25 @@ def render_mello_ai_page() -> None:
                 if hasattr(edited_outputs, "to_dict")
                 else edited_outputs
             )
-            manifest_data["outputs"] = [
+            selected_outputs = [
                 row["output"]
                 for row in output_rows
                 if row.get("output")
             ]
+            if output_mode == "workbook":
+                manifest_data["workbook_sheets"] = selected_outputs
+            manifest_data["outputs"] = selected_outputs
+            if output_mode == "workbook":
+                workbook_name = st.text_input(
+                    "Nome do workbook",
+                    value=manifest_data.get(
+                        "workbook_name",
+                        "relatorio_analitico.xlsx",
+                    ),
+                    key="mello_ai_workbook_name",
+                )
+                manifest_data["workbook_name"] = workbook_name
+                manifest_data["outputs"] = [workbook_name]
         pipeline_validation = PipelineValidator.validate(manifest_data)
         st.session_state["mello_ai_pipeline_validation"] = pipeline_validation
         st.write("**Validação do pipeline**")

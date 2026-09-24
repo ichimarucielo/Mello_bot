@@ -34,9 +34,15 @@ required_files:
   required_columns: []
   cli_argument: --billing
 steps:
-- type: normalize
-- type: reconcile
+- operation: normalize
+  description: ''
+  parameters: {}
+- operation: reconcile
+  description: ''
+  parameters:
+    key: documento
 outputs:
 - conciliacao.xlsx
 - divergencias.xlsx
 tags: []
+pattern: reconciliation

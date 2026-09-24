@@ -39,7 +39,8 @@ app = FastAPI(
     response_model=AIAnalyzeResponse,
 )
 def analyze_automation(request: AutomationRequest):
-    return AutomationDesigner().analyze(request.prompt)
+    analysis = AutomationDesigner().analyze(request.prompt)
+    return AIAnalyzeResponse.model_validate(analysis.model_dump(mode="json"))
 
 
 @app.post(
@@ -56,6 +57,12 @@ def generate_automation_manifest(request: AutomationRequest):
     status_code=201,
 )
 def create_automation_project(request: AICreateProjectRequest):
+    if not request.approved:
+        raise HTTPException(
+            status_code=409,
+            detail="A aprovação humana do Execution Plan é obrigatória.",
+        )
+
     designer = AutomationDesigner()
     manifest_data = getattr(request, "manifest_data", None)
     try:
@@ -390,15 +397,32 @@ def execute_project(
             project=project,
         )
 
-        Executor.run(
+        execution_result = Executor.run(
             project_id=project_id,
             files=project_files,
         )
+
+        if execution_result.status.value != "success":
+            raise HTTPException(
+                status_code=500,
+                detail=execution_result.error_message or "A execução falhou.",
+            )
+
+        output_result = Orchestrator.validate_outputs(project)
+        if not output_result["valid"]:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "A execução terminou sem gerar todos os outputs declarados: "
+                    + ", ".join(output_result["missing"])
+                ),
+            )
 
         return {
             "status": "success",
             "project_id": project_id,
             "files": project_files,
+            "outputs": [item["name"] for item in output_result["found"]],
         }
 
     except Exception as error:

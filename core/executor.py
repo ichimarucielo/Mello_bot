@@ -9,6 +9,7 @@ from core.logger import log_execution_failure, log_execution_start, log_executio
 from core.manifest_loader import load_manifest
 from core.models import ExecutionResult
 from core.settings import BASE_DIR
+from core.template_engine import TemplateEngine
 
 
 class Executor:
@@ -33,7 +34,7 @@ class Executor:
             manifest.entrypoint.script
         )
 
-        if not script_path.exists():
+        if not script_path.exists() and not files:
             raise FileNotFoundError(
                 f"Entrypoint não encontrado: {script_path}"
             )
@@ -72,6 +73,14 @@ class Executor:
                 cli_argument,
                 file_path,
             ])
+
+        # O manifesto é a fonte de verdade do entrypoint gerenciado.
+        pattern = getattr(manifest, "pattern", "generic")
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(
+            TemplateEngine.render_pattern_main(manifest, pattern),
+            encoding="utf-8",
+        )
 
         try:
             result = subprocess.run(

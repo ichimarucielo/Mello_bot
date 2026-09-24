@@ -54,6 +54,8 @@ class AutomationDesigner:
         pattern: str = "generic",
         analysis: AutomationAnalysis | None = None,
     ) -> AutomationGenerationResult:
+        manifest_data = dict(manifest_data)
+        manifest_data.setdefault("pattern", pattern)
         manifest = ManifestGenerator.validate(manifest_data)
         PipelineValidator.assert_valid(manifest.model_dump(mode="json"))
         analysis = analysis or self._analysis_from_manifest(manifest)
@@ -106,7 +108,40 @@ class AutomationDesigner:
             pipeline_validation=PipelineValidator.validate(
                 manifest.model_dump(mode="json")
             ),
+            execution_plan=AutomationDesigner._execution_plan_from_manifest(manifest),
         )
+
+    @staticmethod
+    def _execution_plan_from_manifest(manifest):
+        transformations = []
+        for index, step in enumerate(manifest.steps, start=1):
+            operation = step.operation
+            transformations.append(
+                {
+                    "order": index,
+                    "operation": operation,
+                    "description": step.description,
+                    "parameters": step.parameters,
+                }
+            )
+        return {
+            "summary": (
+                f"{manifest.name}: {len(manifest.required_files)} documento(s), "
+                f"{len(transformations)} transformação(ões) e "
+                f"{len(manifest.outputs)} output(s)."
+            ),
+            "documents": [
+                {
+                    "id": item.id,
+                    "name": item.display_name,
+                    "format": item.accepted_extensions[0].upper(),
+                }
+                for item in manifest.required_files
+            ],
+            "transformations": transformations,
+            "outputs": manifest.outputs,
+            "approved": False,
+        }
 
     @staticmethod
     def _publish_manifest(source_manifest: Path, project_id: str) -> Path:

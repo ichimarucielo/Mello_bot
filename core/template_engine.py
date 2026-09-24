@@ -34,12 +34,18 @@ class TemplateEngine:
             if required_file.cli_argument
         ]
         replacements = {
-            "{{ REQUIRED_FILES }}": json.dumps(required_files, ensure_ascii=False),
-            "{{ OUTPUTS }}": json.dumps(manifest.outputs, ensure_ascii=False),
+            "{{ REQUIRED_FILES }}": repr(required_files),
+            "{{ OUTPUTS }}": repr(manifest.outputs),
+            "{{ OUTPUT_MODE }}": repr(getattr(manifest, "output_mode", "separate")),
+            "{{ WORKBOOK_SHEETS }}": repr(
+                getattr(manifest, "workbook_sheets", []) or manifest.outputs
+            ),
             "{{ OUTPUT_FOLDER }}": repr(getattr(manifest, "output_folder", "data/output")),
             "{{ PROJECT_NAME }}": repr(manifest.name),
             "{{ PROJECT_ID }}": repr(manifest.id),
-            "{{ STEPS }}": json.dumps(manifest.steps, ensure_ascii=False),
+            "{{ STEPS }}": repr(
+                [step.model_dump(mode="python") for step in manifest.steps]
+            ),
         }
         for placeholder, value in replacements.items():
             template = template.replace(placeholder, value)

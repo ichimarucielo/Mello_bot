@@ -4,13 +4,18 @@ from pathlib import Path
 
 import yaml
 import pandas as pd
+from fastapi import HTTPException
 
 from api.app import (
     analyze_automation,
     create_automation_project,
     generate_automation_manifest,
 )
-from api.schemas import AIAnalyzeResponse, AICreateProjectResponse
+from api.schemas import (
+    AICreateProjectRequest,
+    AIAnalyzeResponse,
+    AICreateProjectResponse,
+)
 from core.ai_service import AIService, MockAIService
 from core.automation_designer import AutomationDesigner
 from core.models import AutomationAnalysis, AutomationRequest, Manifest
@@ -252,9 +257,28 @@ def test_ai_endpoints_return_expected_contract(tmp_path: Path, monkeypatch):
     )
     manifest_response = generate_automation_manifest(request)
     create_response = AICreateProjectResponse.model_validate(
-        create_automation_project(request)
+        create_automation_project(
+            AICreateProjectRequest(
+                prompt=PROMPT,
+                approved=True,
+            )
+        )
     )
 
     assert analysis_response.complexity == "media"
+    assert analysis_response.execution_plan["documents"]
+    assert analysis_response.execution_plan["transformations"]
     assert Manifest.model_validate(yaml.safe_load(manifest_response["manifest"]))
     assert create_response.status == "created"
+
+
+def test_ai_create_project_requires_human_approval():
+    try:
+        create_automation_project(
+            AICreateProjectRequest(prompt=PROMPT)
+        )
+    except HTTPException as error:
+        assert error.status_code == 409
+        assert "aprovação humana" in error.detail
+    else:
+        raise AssertionError("A criação deveria exigir aprovação humana.")

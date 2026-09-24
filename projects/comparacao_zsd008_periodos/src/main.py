@@ -5,12 +5,12 @@ from pathlib import Path
 import pandas as pd
 
 
-REQUIRED_FILES = {{ REQUIRED_FILES }}
-OUTPUTS = {{ OUTPUTS }}
-OUTPUT_MODE = {{ OUTPUT_MODE }}
-WORKBOOK_SHEETS = {{ WORKBOOK_SHEETS }}
-PIPELINE_STEPS = {{ STEPS }}
-OUTPUT_FOLDER = {{ OUTPUT_FOLDER }}
+REQUIRED_FILES = [{'id': 'zsd008_antigo', 'cli_argument': '--zsd008-antigo', 'argument_name': 'zsd008_antigo'}, {'id': 'zsd008_novo', 'cli_argument': '--zsd008-novo', 'argument_name': 'zsd008_novo'}]
+OUTPUTS = ['comparação_mes_zsd008.xlsx']
+OUTPUT_MODE = 'workbook'
+WORKBOOK_SHEETS = ['comparação_mes_zsd008.xlsx']
+PIPELINE_STEPS = [{'operation': 'normalize', 'description': '', 'parameters': {'key': None, 'group_by': None, 'sum': None, 'collect': None, 'column': None, 'descending': None}}, {'operation': 'deduplicate', 'description': '', 'parameters': {'key': 'Número da Nota Fiscal', 'group_by': None, 'sum': None, 'collect': None, 'column': None, 'descending': None}}, {'operation': 'aggregate', 'description': '', 'parameters': {'key': None, 'group_by': 'Número da Nota Fiscal', 'sum': ['Valor Bruto', 'Qtde Transação'], 'collect': 'Discriminação', 'column': None, 'descending': None}}, {'operation': 'reconcile', 'description': '', 'parameters': {'key': 'Número da Nota Fiscal', 'group_by': None, 'sum': None, 'collect': None, 'column': None, 'descending': None}}, {'operation': 'aggregate', 'description': '', 'parameters': {'key': None, 'group_by': 'Razão Social', 'sum': None, 'collect': None, 'column': None, 'descending': None}}, {'operation': 'sort', 'description': '', 'parameters': {'key': None, 'group_by': None, 'sum': None, 'collect': None, 'column': 'saldo_liquido', 'descending': True}}]
+OUTPUT_FOLDER = 'data/output'
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def reconcile(left: pd.DataFrame, right: pd.DataFrame) -> tuple[pd.DataFrame, pd
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description={{ PROJECT_NAME }})
+    parser = argparse.ArgumentParser(description='Comparacao ZSD008 entre Periodos')
     for required_file in REQUIRED_FILES:
         parser.add_argument(required_file["cli_argument"], required=True)
     args = parser.parse_args()
@@ -60,7 +60,7 @@ def main() -> None:
         return
     for output_name in OUTPUTS:
         output_map.get(output_name, divergencias).to_excel(output_folder / output_name, index=False)
-    logger.info("Conciliacao base concluida: %s", {{ PROJECT_ID }})
+    logger.info("Conciliacao base concluida: %s", 'comparacao_zsd008_periodos')
     # TODO: implementar regras de negocio, chaves e classificacoes especificas.
 
 
