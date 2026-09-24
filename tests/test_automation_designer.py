@@ -282,3 +282,29 @@ def test_ai_create_project_requires_human_approval():
         assert "aprovação humana" in error.detail
     else:
         raise AssertionError("A criação deveria exigir aprovação humana.")
+
+
+def test_ai_manifest_uses_user_reviewed_inputs():
+    analysis = AutomationDesigner().analyze(PROMPT)
+    reviewed_manifest = analysis.manifest_data
+    reviewed_manifest["required_files"].append(
+        {
+            "id": "metas_comerciais",
+            "display_name": "Metas Comerciais",
+            "cli_argument": "--metas-comerciais",
+            "accepted_extensions": ["xlsx"],
+            "critical_columns": [],
+            "required_columns": [],
+        }
+    )
+
+    response = generate_automation_manifest(
+        AutomationRequest(prompt=PROMPT, manifest_data=reviewed_manifest)
+    )
+    manifest = Manifest.model_validate(yaml.safe_load(response["manifest"]))
+
+    assert [item.id for item in manifest.required_files] == [
+        "fs10n",
+        "billing",
+        "metas_comerciais",
+    ]

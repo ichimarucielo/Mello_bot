@@ -1,17 +1,57 @@
-# Antifraude
+# ComparaçãoFBL5N
 
 ## Objetivo
 
-Preciso validar uma base de transações
-e sinalizar risco.
+Recebi dois relatórios financeiros.
+
+O primeiro representa o razão contábil completo contendo faturamentos, compensações, baixas, aging, vencimentos e histórico dos documentos.
+
+O segundo representa os recebimentos realizados.
+
+Preciso construir uma análise de conciliação entre os dois arquivos.
+
+Objetivos:
+
+- identificar quais documentos do relatório contábil já possuem recebimento;
+- identificar quais documentos permanecem sem recebimento;
+- identificar divergências de valor entre faturamento e recebimento;
+- identificar documentos duplicados;
+- consolidar valores por cliente;
+- consolidar valores por mês;
+- gerar indicadores de recebimento;
+- calcular percentual conciliado e não conciliado;
+- destacar os maiores impactos financeiros;
+- criar um diagnóstico apontando possíveis problemas de qualidade dos dados.
+
+A solução deve:
+
+- identificar automaticamente a melhor chave de conciliação;
+- preservar zeros à esquerda;
+- tratar as chaves como texto;
+- remover espaços extras;
+- consolidar duplicidades quando necessário;
+- sugerir regras de agregação quando houver múltiplos registros para o mesmo documento.
+
+Quero receber primeiro o Execution Plan contendo:
+
+- documentos identificados;
+- chaves sugeridas;
+- operações propostas;
+- riscos encontrados;
+- outputs sugeridos.
+
+Não gere o projeto ainda.
+
+Aguarde aprovação após apresentar o plano.
 
 ## Inputs
 
-- `base_antifraude`: Base Antifraude (csv)
+- `fbl5n_aberta`: FBL5N Em Aberto (xlsx)
+- `fbl5n_compensada`: FBL5N Compensada (xlsx)
 
 ## Outputs
 
-- `antifraude.xlsx`
+- `fbl5nConciliação.xlsx`
 
 ## Como executar
 

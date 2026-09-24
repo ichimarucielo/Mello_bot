@@ -18,17 +18,16 @@ class DocumentResolver:
 
     def detect_documents(self, prompt: str) -> list[dict[str, Any]]:
         profiles = self.catalog.resolve_profiles(prompt)
-        if profiles:
-            return [
-                {
-                    "id": profile["id"],
-                    "display_name": profile.get("name", profile["id"]),
-                    "source": profile.get("source"),
-                    "extension": (profile.get("accepted_extensions") or ["csv"])[0],
-                }
-                for profile in profiles
-            ]
-        return [
+        profile_documents = [
+            {
+                "id": profile["id"],
+                "display_name": profile.get("name", profile["id"]),
+                "source": profile.get("source"),
+                "extension": (profile.get("accepted_extensions") or ["csv"])[0],
+            }
+            for profile in profiles
+        ]
+        generic_documents = [
             {
                 "id": document.id,
                 "display_name": document.display_name,
@@ -37,12 +36,17 @@ class DocumentResolver:
             }
             for document in GenericDocumentDetector.detect(prompt)
         ]
+        return self._merge_prompt_documents(
+            profile_documents,
+            generic_documents,
+            prompt,
+        )
 
     def resolve_profiles(self, prompt: str) -> list[dict[str, Any]]:
         return self.catalog.resolve_profiles(prompt)
 
     def detect_file_entities(self, prompt: str) -> list[dict[str, Any]]:
-        entities: list[dict[str, Any]] = []
+        profile_entities: list[dict[str, Any]] = []
         profiles = self.resolve_profiles(prompt)
         for profile in profiles:
             definition = self.catalog.definitions[profile["id"]]
@@ -54,7 +58,7 @@ class DocumentResolver:
                 file_id = profile["id"]
                 if qualifier:
                     file_id = f"{file_id}_{qualifier}"
-                entities.append(
+                profile_entities.append(
                     self._file_entity(
                         profile=profile,
                         definition=definition,
@@ -63,10 +67,7 @@ class DocumentResolver:
                     )
                 )
 
-        if entities:
-            return self._deduplicate_entities(entities)
-
-        return [
+        generic_entities = [
             self._file_entity(
                 profile={
                     "id": document.id,
@@ -81,6 +82,11 @@ class DocumentResolver:
             )
             for document in GenericDocumentDetector.detect(prompt)
         ]
+        return self._merge_prompt_documents(
+            profile_entities,
+            generic_entities,
+            prompt,
+        )
 
     def source_patterns(self, prompt: str) -> list[str]:
         sources = []
@@ -89,6 +95,48 @@ class DocumentResolver:
             if source and source not in sources:
                 sources.append(source)
         return sources
+
+    def resolve_intent(self, prompt: str) -> dict[str, Any]:
+        """Resolve user intent without consulting document profiles."""
+        normalized = prompt.casefold()
+        operations: list[str] = []
+        aliases = {
+            "reconcile": ("compar", "concili", "diverg", "confront"),
+            "join": ("juntar", "unir", "relacionar"),
+            "consolidate": ("consolidar", "unificar", "consolidado"),
+            "filter": ("filtrar", "somente", "apenas"),
+            "validate": ("validar", "validacao", "conferir"),
+            "aggregate": ("agrupar", "agrupe", "totalizar", "resumo"),
+            "calculate": ("calcular", "criar coluna", "formula"),
+            "export": ("exportar", "gerar arquivo", "salvar resultado"),
+        }
+        for operation, terms in aliases.items():
+            if any(term in normalized for term in terms):
+                operations.append(operation)
+        if "cruz" in normalized and "ambas" in normalized:
+            operations.append("reconcile")
+        elif "cruz" in normalized:
+            operations.append("join")
+        period_comparison = (
+            "reconcile" in operations
+            and any(term in normalized for term in ("period", "mes", "antigo", "novo"))
+        )
+        if period_comparison:
+            operations.insert(0, "period_comparison")
+        if "reconcile" in operations:
+            pattern = "reconciliation"
+        elif "consolidate" in operations or "aggregate" in operations:
+            pattern = "consolidation"
+        elif "validate" in operations:
+            pattern = "validation"
+        else:
+            pattern = "generic"
+        return {
+            "operations": operations,
+            "explicit": bool(operations),
+            "period_comparison": period_comparison,
+            "pattern": pattern,
+        }
 
     def preferred_extension(self, prompt: str) -> str | None:
         profiles = self.resolve_profiles(prompt)
@@ -204,6 +252,46 @@ class DocumentResolver:
                 unique.append(entity)
                 seen.add(entity["id"])
         return unique
+
+    def _merge_prompt_documents(
+        self,
+        profile_documents: list[dict[str, Any]],
+        generic_documents: list[dict[str, Any]],
+        prompt: str,
+    ) -> list[dict[str, Any]]:
+        """Preserve every prompt input while preferring catalog metadata on duplicates."""
+        if profile_documents and {
+            document["id"] for document in generic_documents
+        } <= {"entrada_1", "entrada_2"}:
+            generic_documents = []
+        merged = list(profile_documents)
+        profile_roles = {
+            role
+            for document in profile_documents
+            for role in document["id"].split("_")
+        }
+        merged.extend(
+            document
+            for document in generic_documents
+            if document["id"] not in profile_roles
+        )
+        merged = self._deduplicate_entities(merged)
+        return sorted(
+            merged,
+            key=lambda document: self._prompt_position(document, prompt),
+        )
+
+    def _prompt_position(self, document: dict[str, Any], prompt: str) -> int:
+        profile = self.catalog.get_profile(document["id"])
+        candidates = [document["id"].replace("_", " "), document.get("display_name", "")]
+        if profile:
+            candidates.extend(profile.get("aliases", []))
+        positions = [
+            prompt.casefold().find(candidate.casefold())
+            for candidate in candidates
+            if candidate and prompt.casefold().find(candidate.casefold()) >= 0
+        ]
+        return min(positions, default=len(prompt))
 
     def infer_keys(
         self,

@@ -62,6 +62,7 @@ capabilities:
   - reconciliation
   - aggregation
 pattern: reconciliation
+project_name: Conciliacao FBL5N
 qualifier_strategy: context
 qualifier_tokens:
   - aberta

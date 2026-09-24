@@ -1,5 +1,5 @@
 id: consolidacao_dados
-name: Consolidacao Dados
+name: Consolidacao de Dados
 category: operacional
 description: Consolidar os arquivos mensais de vendas 1.
 project_path: projects/consolidacao_dados

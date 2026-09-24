@@ -1,6 +1,7 @@
 id: contas_pagar
 name: Contas a Pagar
 source: financeiro
+category: financeiro
 aliases:
   - contas a pagar
   - contas pagar
@@ -8,6 +9,8 @@ aliases:
 accepted_extensions:
   - xlsx
 required_columns: []
+key_columns:
+  - documento
 capabilities:
   - reconciliation
   - aggregation

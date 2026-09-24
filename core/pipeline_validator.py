@@ -31,9 +31,23 @@ class PipelineValidator:
                 if not step.parameters.get(parameter)
             ]
             if missing:
-                errors.append(
-                    f"{step_type} requer: {', '.join(missing)}."
-                )
+                pending = set(step.pending_confirmation)
+                unresolved = {
+                    "key": {"chave_join", "chave_conciliacao"},
+                    "group_by": {"agrupamento"},
+                }
+                if any(
+                    confirmation in pending
+                    for parameter in missing
+                    for confirmation in unresolved.get(parameter, set())
+                ):
+                    warnings.append(
+                        f"{step_type} aguarda confirmação: {', '.join(missing)}."
+                    )
+                else:
+                    errors.append(
+                        f"{step_type} requer: {', '.join(missing)}."
+                    )
             if step_type == "filter" and not (
                 step.parameters.get("condition")
                 or step.parameters.get("column")

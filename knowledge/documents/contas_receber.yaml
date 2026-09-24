@@ -1,6 +1,7 @@
 id: contas_receber
 name: Contas a Receber
 source: financeiro
+category: financeiro
 aliases:
   - contas a receber
   - contas receber
@@ -8,6 +9,8 @@ aliases:
 accepted_extensions:
   - xlsx
 required_columns: []
+key_columns:
+  - documento
 capabilities:
   - reconciliation
   - aggregation

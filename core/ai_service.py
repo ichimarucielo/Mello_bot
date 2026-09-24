@@ -48,17 +48,19 @@ class MockAIService(AIService):
     def analyze(self, prompt: str) -> AutomationAnalysis:
         normalized_prompt = prompt.strip()
         prompt_lower = self._normalize(normalized_prompt)
+        intent = self.RESOLVER.resolve_intent(prompt_lower)
         file_entities = self._detect_file_entities(prompt_lower)
         sources = self._detect_sources(prompt_lower, file_entities)
         document_ids = self._document_ids(file_entities)
         profile_metadata = self.RESOLVER.profile_metadata(document_ids)
+        profile_metadata["intent"] = intent
         reconciliation = self._is_reconciliation(
             prompt_lower,
             document_ids,
             file_entities,
             profile_metadata,
         )
-        consolidation = self._is_consolidation(prompt_lower)
+        consolidation = "consolidate" in intent["operations"]
         power_bi = self._is_power_bi(prompt_lower)
         pattern = self._pattern(
             prompt_lower,
@@ -112,8 +114,22 @@ class MockAIService(AIService):
         )
         resolved_profiles = self.RESOLVER.resolve_profiles(prompt_lower)
         resolver_keys = self.RESOLVER.infer_keys(prompt_lower, inputs)
+        workbook_requested = "workbook" in prompt_lower or (
+            "unico" in prompt_lower and ("excel" in prompt_lower or "arquivo" in prompt_lower)
+        )
         execution_plan = execution_plan.model_copy(
             update={
+                "intent": self._intent_label(intent),
+                "intent_confidence": "alta" if intent.get("explicit") else "baixa",
+                "intent_source": ["prompt"] if intent.get("explicit") else [],
+                "intent_summary": self._intent_summary(
+                    intent,
+                    prompt_lower,
+                    workbook_requested,
+                ),
+                "decisions": self._plan_decisions(
+                    steps, prompt_lower, resolver_keys, profile_metadata
+                ),
                 "profiles": [
                     {
                         "id": profile["id"],
@@ -132,6 +148,7 @@ class MockAIService(AIService):
                     if inputs
                     else ["Quais arquivos devem ser processados?"]
                 ),
+                "output_details": self._output_details(outputs, intent),
             }
         )
 
@@ -167,6 +184,11 @@ class MockAIService(AIService):
             }
             for item in inputs
         ]
+        if workbook_requested and len(outputs) > 1:
+            manifest_data["output_mode"] = "workbook"
+            manifest_data["workbook_sheets"] = list(outputs)
+            manifest_data["workbook_name"] = "resultado.xlsx"
+            manifest_data["outputs"] = ["resultado.xlsx"]
         pipeline_validation = PipelineValidator.validate(manifest_data)
 
         return AutomationAnalysis(
@@ -196,6 +218,138 @@ class MockAIService(AIService):
             pipeline_validation=pipeline_validation,
             execution_plan=execution_plan,
         )
+
+    @staticmethod
+    def _intent_label(intent: dict[str, Any]) -> str:
+        labels = {
+            "period_comparison": "Comparação de períodos",
+            "reconcile": "Conciliação de dados",
+            "join": "Relacionamento de bases",
+            "consolidate": "Consolidação de dados",
+            "aggregate": "Agregação de dados",
+            "validate": "Validação de dados",
+            "calculate": "Cálculo de indicadores",
+            "filter": "Filtragem de dados",
+            "export": "Exportação de resultados",
+        }
+        operations = intent.get("operations", [])
+        priority = (
+            "period_comparison",
+            "reconcile",
+            "consolidate",
+            "aggregate",
+            "calculate",
+            "validate",
+            "join",
+            "filter",
+            "export",
+        )
+        return next((labels[item] for item in priority if item in operations), "Processamento de dados")
+
+    @classmethod
+    def _intent_summary(
+        cls,
+        intent: dict[str, Any],
+        prompt: str = "",
+        workbook_requested: bool = False,
+    ) -> str:
+        if (
+            "vendas" in prompt
+            and re.search(
+                r"\b(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b",
+                prompt,
+            )
+            and "cliente" in prompt
+            and "produto" in prompt
+        ):
+            summary = (
+                "O MELLO entendeu que você deseja analisar vendas de julho, "
+                "eliminar registros inválidos, calcular faturamento por cliente e produto, "
+                "gerar rankings dos maiores resultados e produzir um resumo executivo "
+                "com diagnóstico."
+            )
+            if workbook_requested:
+                summary += " Tudo será entregue em um único arquivo Excel."
+            return summary
+        label = cls._intent_label(intent).lower()
+        operations = intent.get("operations", [])
+        if len(operations) > 1:
+            summary = (
+                f"O MELLO entendeu que você deseja {label}, "
+                "aplicar as operações identificadas e gerar os resultados revisáveis."
+            )
+        else:
+            summary = f"O MELLO entendeu que você deseja {label}."
+        if workbook_requested:
+            summary += " Tudo será entregue em um único arquivo Excel."
+        return summary
+
+    @staticmethod
+    def _plan_decisions(
+        steps: list[dict[str, Any]],
+        prompt: str,
+        keys: list[str],
+        profile_metadata: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        decisions = []
+        for step in steps:
+            operation = step.get("type", step.get("operation", "operação"))
+            parameters = {
+                key: value
+                for key, value in step.items()
+                if key not in {"type", "operation", "description", "confidence", "pending_confirmation"}
+                and value is not None
+            }
+            pending = step.get("pending_confirmation", [])
+            confidence = step.get("confidence", "alta" if parameters else "baixa")
+            source = ["prompt"] if parameters else []
+            if keys and operation in {"join", "reconcile", "deduplicate"}:
+                source = ["perfil"] if not re.search(r"(?:por|pelo|pela|usando|chave)", prompt) else ["prompt"]
+            reasons = {
+                "normalize": "padronizar nomes e formatos antes do processamento",
+                "deduplicate": "evitar que registros repetidos distorçam os resultados",
+                "join": "relacionar as entradas por uma chave informada",
+                "reconcile": "comparar ou identificar diferenças entre entradas",
+                "aggregate": "consolidar os dados conforme solicitado",
+                "calculate": "calcular um indicador solicitado",
+                "filter": "restringir os dados conforme o filtro informado",
+                "unmatched_records": "identificar registros sem correspondência na base relacionada",
+                "validate": "verificar a qualidade dos dados",
+                "export": "gerar o resultado solicitado",
+            }
+            decisions.append({
+                "operation": operation,
+                "parameters": parameters,
+                "confidence": confidence,
+                "source": source,
+                "reason": reasons.get(operation, "atender à intenção identificada"),
+                "pending_confirmation": pending,
+            })
+        return decisions
+
+    @staticmethod
+    def _output_details(outputs: list[str], intent: dict[str, Any]) -> list[dict[str, Any]]:
+        reasons = {
+            "resumo_executivo.xlsx": "oferecer uma visão gerencial do resultado",
+            "nfs_perdidas.xlsx": "listar documentos ausentes entre períodos comparados",
+            "nfs_novas.xlsx": "listar documentos novos entre períodos comparados",
+            "analise_por_cliente.xlsx": "permitir análise do impacto por grupo",
+            "analise_mensal.xlsx": "permitir acompanhamento temporal",
+            "top_perdas.xlsx": "destacar os maiores impactos",
+            "diagnostico.txt": "registrar riscos e conclusões da análise",
+            "conciliacao.xlsx": "entregar registros conciliados",
+            "divergencias.xlsx": "entregar registros não conciliados ou divergentes",
+            "consolidado.xlsx": "entregar a base consolidada",
+            "resultado.xlsx": "entregar o resultado do processamento",
+        }
+        return [
+            {
+                "name": output,
+                "reason": reasons.get(output, "atender ao output definido no plano"),
+                "source": ["prompt"] if intent.get("explicit") else [],
+            }
+            for output in outputs
+        ]
 
     @staticmethod
     def _normalize(value: str) -> str:
@@ -240,6 +394,9 @@ class MockAIService(AIService):
         power_bi: bool,
         profile_metadata: dict[str, Any],
     ) -> str:
+        intent = profile_metadata.get("intent", {})
+        if intent.get("explicit"):
+            return intent["pattern"]
         if profile_metadata.get("pattern"):
             return profile_metadata["pattern"]
         if reconciliation:
@@ -262,6 +419,11 @@ class MockAIService(AIService):
         file_entities: list[dict[str, Any]],
         profile_metadata: dict[str, Any],
     ) -> bool:
+        intent = profile_metadata.get("intent", {})
+        if intent.get("explicit") and any(
+            operation in intent.get("operations", []) for operation in ("reconcile", "join")
+        ):
+            return "reconcile" in intent.get("operations", [])
         explicit_reconciliation = any(
             term in prompt
             for term in cls.RECONCILIATION_TERMS
@@ -296,7 +458,34 @@ class MockAIService(AIService):
         power_bi: bool,
         profile_metadata: dict[str, Any],
     ) -> str:
+        intent = profile_metadata.get("intent", {})
+        if intent.get("period_comparison"):
+            base = "comparacao_" + "_".join(
+                MockAIService._document_families(document_ids) or ["periodos"]
+            ) + "_periodos"
+            return re.sub(r"[^a-z0-9]+", "_", base).strip("_")
         profiles = profile_metadata.get("profiles", [])
+        configured_ids = {
+            profile.get("project_id")
+            for profile in profiles
+            if profile.get("project_id")
+        }
+        if len(configured_ids) == 1 and reconciliation:
+            return next(iter(configured_ids))
+        if "margem" in prompt and "cliente" in prompt:
+            base = "resumo_clientes_vendas"
+        elif intent.get("explicit"):
+            if "reconcile" in intent["operations"]:
+                base = "conciliacao_" + "_".join(
+                    MockAIService._document_families(document_ids) or ["arquivos"]
+                )
+            elif "consolidate" in intent["operations"]:
+                base = "consolidacao_dados"
+            elif document_ids:
+                base = document_ids[0]
+            else:
+                base = "automacao"
+            return re.sub(r"[^a-z0-9]+", "_", base).strip("_")
         configured_id = next(
             (profile.get("project_id") for profile in profiles if profile.get("project_id")),
             None,
@@ -330,6 +519,30 @@ class MockAIService(AIService):
         power_bi: bool,
         profile_metadata: dict[str, Any],
     ) -> str:
+        intent = profile_metadata.get("intent", {})
+        if intent.get("period_comparison"):
+            families = MockAIService._document_families(document_ids)
+            return "Comparacao " + " x ".join(
+                family.upper() for family in families
+            ) + " entre Periodos"
+        profiles = profile_metadata.get("profiles", [])
+        configured_names = {
+            profile.get("project_name")
+            for profile in profiles
+            if profile.get("project_name")
+        }
+        if len(configured_names) == 1 and reconciliation:
+            return next(iter(configured_names))
+        if "margem" in prompt and "cliente" in prompt:
+            return "Análise de Margem por Cliente"
+        if intent.get("explicit"):
+            if "reconcile" in intent["operations"]:
+                return "Conciliacao de Documentos"
+            if "consolidate" in intent["operations"]:
+                return "Consolidacao de Dados"
+            if document_ids:
+                return "Automacao " + document_ids[0].replace("_", " ").title()
+            return "Automacao Gerada"
         profiles = profile_metadata.get("profiles", [])
         configured_name = next(
             (profile.get("project_name") for profile in profiles if profile.get("project_name")),
@@ -397,6 +610,8 @@ class MockAIService(AIService):
                     "operation": operation,
                     "description": description,
                     "parameters": details,
+                    "confidence": typed_step.confidence,
+                    "pending_confirmation": typed_step.pending_confirmation,
                 }
             )
 
@@ -429,8 +644,11 @@ class MockAIService(AIService):
         prompt: str,
         profile_metadata: dict[str, Any],
     ) -> str:
+        intent = profile_metadata.get("intent", {})
         if profile_metadata.get("category"):
             return profile_metadata["category"]
+        if intent.get("explicit"):
+            return "operacional"
         if power_bi and not reconciliation:
             return "power_bi"
         if any(term in prompt for term in MockAIService.ANTIFRAUD_TERMS):
@@ -454,12 +672,42 @@ class MockAIService(AIService):
         profile_metadata: dict[str, Any] | None = None,
     ) -> list[str]:
         steps = steps or []
+        intent = (profile_metadata or {}).get("intent", {})
+        aggregate_steps = [
+            step for step in steps if step.get("type") == "aggregate" and step.get("group_by")
+        ]
+        top_n_steps = [step for step in steps if step.get("type") == "top_n"]
+        if len(aggregate_steps) > 1 or top_n_steps:
+            explicit_outputs = [
+                f"totais_por_{step['group_by']}.xlsx" for step in aggregate_steps
+            ]
+            explicit_outputs.extend(
+                f"top_{step['limit']}_por_{step['group_by']}.xlsx" for step in top_n_steps
+            )
+            if "resumo executivo" in prompt:
+                explicit_outputs.append("resumo_executivo.xlsx")
+            if "diagnostico" in prompt:
+                explicit_outputs.append("diagnostico.xlsx")
+            if explicit_outputs:
+                return explicit_outputs
+        if intent.get("period_comparison"):
+            return [
+                "resumo_executivo.xlsx",
+                "nfs_perdidas.xlsx",
+                "nfs_novas.xlsx",
+                "analise_por_cliente.xlsx",
+                "analise_mensal.xlsx",
+                "top_perdas.xlsx",
+                "diagnostico.txt",
+            ]
+        if intent.get("explicit") and "consolidate" in intent.get("operations", []):
+            return ["consolidado.xlsx"]
         profiles = (profile_metadata or {}).get("profiles", [])
         configured_outputs = next(
             (profile.get("suggested_outputs") for profile in profiles if profile.get("suggested_outputs")),
             None,
         )
-        if configured_outputs:
+        if configured_outputs and not intent.get("explicit"):
             return list(configured_outputs)
         if power_bi and not reconciliation:
             return ["dataset.csv"]
@@ -494,40 +742,50 @@ class MockAIService(AIService):
         profile_metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         capabilities = (profile_metadata or {}).get("capabilities", [])
-        if "period_comparison" in capabilities:
+        intent = (profile_metadata or {}).get("intent", {})
+        profile_keys = []
+        for profile in (profile_metadata or {}).get("profiles", []):
+            for key in profile.get("key_columns", []):
+                if key not in profile_keys:
+                    profile_keys.append(key)
+        if intent.get("period_comparison") or (
+            not intent.get("explicit") and "period_comparison" in capabilities
+        ):
             profiles = (profile_metadata or {}).get("profiles", [])
             profile = profiles[0] if profiles else {}
             comparison = profile.get("comparison", {})
             return [
                 {"type": "normalize"},
-                {"type": "deduplicate", "key": comparison.get("key", "documento")},
+                {"type": "deduplicate", "key": comparison.get("key")},
                 {
                     "type": "aggregate",
-                    "group_by": comparison.get("group_by", "documento"),
+                    "group_by": comparison.get("group_by"),
                     "sum": comparison.get("sum", []),
-                    "collect": comparison.get("collect", "itens"),
+                    "collect": comparison.get("collect"),
                 },
-                {"type": "reconcile", "key": comparison.get("key", "documento")},
-                {"type": "aggregate", "group_by": comparison.get("client_group", "grupo")},
-                {"type": "sort", "column": comparison.get("sort", "saldo"), "descending": True},
+                {"type": "reconcile", "key": comparison.get("key")},
+                {"type": "aggregate", "group_by": comparison.get("client_group")},
+                {"type": "sort", "column": comparison.get("sort"), "descending": True},
             ]
         steps: list[dict[str, Any]] = []
         if reconciliation or mentions(prompt, "normalize"):
             steps.append({"type": "normalize"})
         if mentions(prompt, "deduplicate"):
             steps.append({"type": "deduplicate"})
-        if mentions(prompt, "remove_nulls"):
-            null_column = None
-            null_match = re.search(
-                r"(?:sem|sem registros? sem|sem registros de|remover registros sem)\s+([a-zà-ú][\wà-ú]*)",
-                prompt,
-            )
-            if null_match:
-                null_column = null_match.group(1)
-            step = {"type": "remove_nulls"}
-            if null_column:
-                step["column"] = null_column
-            steps.append(step)
+        null_columns: list[str] = []
+        for null_pattern in (
+            r"remov(?:er|a)\s+registros?\s+onde\s+([a-zà-ú][\wà-ú]*)\s+(?:esteja|estiver|est[aá])\s+vazi[oa]",
+            r"remov(?:er|a)\s+registros?\s+sem\s+([a-zà-ú][\wà-ú]*)",
+        ):
+            for null_match in re.finditer(null_pattern, prompt):
+                column = null_match.group(1)
+                if column not in null_columns:
+                    null_columns.append(column)
+        if null_columns:
+            for column in null_columns:
+                steps.append({"type": "remove_nulls", "column": column})
+        elif mentions(prompt, "remove_nulls"):
+            steps.append({"type": "remove_nulls"})
         month_match = re.search(
             r"\b(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b",
             prompt,
@@ -542,14 +800,13 @@ class MockAIService(AIService):
             year_match = re.search(r"\b20\d{2}\b", prompt)
             steps.append({
                 "type": "filter",
-                "column": "data",
+                "column": None,
                 "operator": "month_year",
                 "value": f"{year_match.group(0) if year_match else 'current'}-{months[month_match.group(1)]}",
-                "condition": (
-                    f"month(data)={int(months[month_match.group(1)])}"
-                    if not year_match
-                    else f"month_year(data)={year_match.group(0)}-{months[month_match.group(1)]}"
-                ),
+                "temporal_filter": month_match.group(1),
+                "condition": f"mês = {month_match.group(1)}",
+                "confidence": "baixa",
+                "pending_confirmation": ["coluna_data"],
             })
         company_match = re.search(r"empresa\s+(?:=|igual a)?\s*(\d+)", prompt)
         if company_match:
@@ -560,18 +817,27 @@ class MockAIService(AIService):
                 "value": company_match.group(1),
                 "condition": f"empresa={company_match.group(1)}",
             })
-        if mentions(prompt, "join"):
+        unmatched_customer_requested = bool(
+            re.search(r"\bvendas\s+sem\s+cliente\s+cadastrado\b", prompt)
+        )
+        if mentions(prompt, "join") or unmatched_customer_requested:
             key_match = re.search(
                 r"(?:pelo|por|usando)\s+(documento|cnpj|cpf|nf|nota fiscal)",
                 prompt,
             )
-            key = key_match.group(1) if key_match else "documento"
-            steps.append({
+            key = key_match.group(1) if key_match else None
+            join_step = {
                 "type": "join",
                 "left_key": key,
                 "right_key": key,
                 "key": key,
-            })
+            }
+            if not key:
+                join_step.update(
+                    confidence="baixa",
+                    pending_confirmation=["chave_join"],
+                )
+            steps.append(join_step)
         formula_match = re.search(
             r"(?:criar coluna\s+)?([a-zà-ú][\wà-ú]*)\s*(?:=|:)\s*([a-zà-ú][\wà-ú]*\s*[+\-*/]\s*[a-zà-ú][\wà-ú]*)|calcular\s+([a-zà-ú][\wà-ú]*)\s*:\s*([a-zà-ú][\wà-ú]*\s*[+\-*/]\s*[a-zà-ú][\wà-ú]*)",
             prompt,
@@ -588,7 +854,9 @@ class MockAIService(AIService):
             steps.append({
                 "type": "calculate",
                 "column": "margem",
-                "formula": "",
+                "formula": None,
+                "confidence": "baixa",
+                "pending_confirmation": ["formula_calculo"],
             })
         drop_columns_match = re.search(
             r"(?:remov(?:er|a)|exclu(?:ir|a))\s+(?:as\s+)?colunas?\s+(.+?)(?:\.|$)",
@@ -625,20 +893,142 @@ class MockAIService(AIService):
                 "type": "sort",
                 "column": sort_match.group(1) if sort_match else None,
             })
-        if (
+        value_column = next(
+            (column for column in null_columns if column in ("valor", "montante", "total", "preco")),
+            None,
+        )
+        total_by_matches = list(
+            re.finditer(
+                r"(?:total|faturamento|vendas)\s+por\s+([a-zà-ú][\wà-ú]*)",
+                prompt,
+            )
+        )
+        if total_by_matches:
+            seen_group_by: list[str] = []
+            for total_match in total_by_matches:
+                group_by = total_match.group(1)
+                if group_by in seen_group_by:
+                    continue
+                seen_group_by.append(group_by)
+                aggregate_step = {"type": "aggregate", "group_by": group_by}
+                if value_column:
+                    aggregate_step["sum"] = [value_column]
+                else:
+                    aggregate_step.update(
+                        confidence="baixa",
+                        pending_confirmation=["coluna_valor"],
+                    )
+                steps.append(aggregate_step)
+        elif (
             "resumo" in prompt
             or "agrupar" in prompt
             or "agrupe por" in prompt
             or "totalizar" in prompt
         ):
+            group_by = (
+                "empresa"
+                if "empresa" in prompt
+                else "cliente"
+                if "cliente" in prompt
+                else None
+            )
+            aggregate_step = {"type": "aggregate", "group_by": group_by}
+            if group_by is None:
+                aggregate_step.update(
+                    confidence="baixa",
+                    pending_confirmation=["agrupamento"],
+                )
+            steps.append(aggregate_step)
+        top_n_groups: set[tuple[int, str]] = set()
+        for top_match in re.finditer(
+            r"identificar\s+os\s+(\d+)\s+([a-zà-ú][\wà-ú]*?)s?\s+com\s+maior\s+([a-zà-ú][\wà-ú]*)",
+            prompt,
+        ):
+            limit, group_by_word, _metric = top_match.groups()
+            group_by_word = group_by_word.rstrip("s")
+            top_n_groups.add((int(limit), group_by_word))
+            top_step = {
+                "type": "top_n",
+                "group_by": group_by_word,
+                "limit": int(limit),
+            }
+            if value_column:
+                top_step["order_by"] = value_column
+            else:
+                top_step.update(
+                    confidence="baixa",
+                    pending_confirmation=["coluna_ordenacao"],
+                )
+            steps.append(top_step)
+        for top_match in re.finditer(
+            r"\btop\s+(\d+)\s+([a-zà-ú][\wà-ú]*?)s?\b",
+            prompt,
+        ):
+            limit, group_by_word = top_match.groups()
+            group_by_word = group_by_word.rstrip("s")
+            if (int(limit), group_by_word) in top_n_groups:
+                continue
+            top_step = {
+                "type": "top_n",
+                "group_by": group_by_word,
+                "limit": int(limit),
+            }
+            if value_column:
+                top_step["order_by"] = value_column
+            else:
+                top_step.update(
+                    confidence="baixa",
+                    pending_confirmation=["coluna_ordenacao"],
+                )
+            steps.append(top_step)
+        if unmatched_customer_requested:
             steps.append({
-                "type": "aggregate",
-                "group_by": "empresa" if "empresa" in prompt else "cliente",
+                "type": "unmatched_records",
+                "left_source": "vendas",
+                "right_source": "cadastro_clientes",
+                "confidence": "baixa",
+                "pending_confirmation": ["chave_join"],
             })
         if reconciliation:
-            steps.append({"type": "reconcile", "key": "documento"})
+            key = (
+                profile_keys[0]
+                if len(profile_keys) == 1
+                else profile_keys
+                if profile_keys
+                else None
+            )
+            step = {
+                "type": "reconcile",
+                "key": key,
+            }
+            if key is None:
+                step.update(
+                    confidence="baixa",
+                    pending_confirmation=["chave_conciliacao"],
+                )
+            steps.append({
+                **step,
+            })
         elif mentions(prompt, "reconcile"):
-            steps.append({"type": "reconcile", "key": "documento"})
+            key = (
+                profile_keys[0]
+                if len(profile_keys) == 1
+                else profile_keys
+                if profile_keys
+                else None
+            )
+            steps.append({
+                "type": "reconcile",
+                "key": key,
+                **(
+                    {
+                        "confidence": "baixa",
+                        "pending_confirmation": ["chave_conciliacao"],
+                    }
+                    if key is None
+                    else {}
+                ),
+            })
         if mentions(prompt, "validate"):
             steps.append({"type": "validate"})
         if mentions(prompt, "export"):

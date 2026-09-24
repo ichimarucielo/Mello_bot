@@ -7,6 +7,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    field_validator,
     model_validator,
 )
 
@@ -103,6 +104,8 @@ class RunProjectResult(BaseModel):
 class AutomationRequest(BaseModel):
     prompt: str = Field(min_length=1)
 
+    manifest_data: dict[str, Any] | None = None
+
 
 class OperationStep(BaseModel):
     operation: str
@@ -111,27 +114,64 @@ class OperationStep(BaseModel):
 
     parameters: dict[str, Any] = Field(default_factory=dict)
 
+    confidence: str = "baixa"
+
+    pending_confirmation: list[str] = Field(default_factory=list)
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def default_null_confidence(cls, value: Any) -> str:
+        return value or "baixa"
+
+    @field_validator("pending_confirmation", mode="before")
+    @classmethod
+    def default_null_pending_confirmation(cls, value: Any) -> list[str]:
+        return value or []
+
     @model_validator(mode="before")
     @classmethod
     def normalize_legacy_step(cls, value: Any) -> Any:
-        if not isinstance(value, dict) or "operation" in value:
+        if not isinstance(value, dict):
             return value
+        if "operation" in value:
+            normalized = dict(value)
+            parameters = normalized.get("parameters") or {}
+            pending = normalized.get("pending_confirmation") or []
+            has_evidence = any(item is not None for item in parameters.values())
+            default_confidence = "baixa" if pending or not has_evidence else "alta"
+            normalized["description"] = normalized.get("description") or ""
+            normalized["parameters"] = parameters
+            normalized["confidence"] = (
+                normalized.get("confidence") or default_confidence
+            )
+            normalized["pending_confirmation"] = pending
+            return normalized
         operation = value.get("type")
         if not operation:
             return value
         parameters = {
             key: item
             for key, item in value.items()
-            if key not in {"type", "description"}
+            if key not in {
+                "type",
+                "description",
+                "confidence",
+                "pending_confirmation",
+            }
         }
         if operation in {"join", "reconcile"} and "key" not in parameters:
             parameters["key"] = parameters.get("left_key") or parameters.get(
                 "right_key"
             )
+        pending = value.get("pending_confirmation") or []
+        has_evidence = any(item is not None for item in parameters.values())
+        default_confidence = "baixa" if pending or not has_evidence else "alta"
         return {
             "operation": operation,
             "description": value.get("description", ""),
             "parameters": parameters,
+            "confidence": value.get("confidence") or default_confidence,
+            "pending_confirmation": pending,
         }
 
     @property
@@ -173,7 +213,12 @@ class OperationStep(BaseModel):
 
     def __eq__(self, other: Any) -> bool:
         if isinstance(other, dict):
-            legacy = {"type": self.operation, **self.parameters}
+            legacy = {
+                "type": self.operation,
+                **self.parameters,
+                "confidence": self.confidence,
+                "pending_confirmation": self.pending_confirmation,
+            }
             return all(legacy.get(key) == value for key, value in other.items())
         return super().__eq__(other)
 
@@ -219,6 +264,16 @@ class ExecutionContext(BaseModel):
 class ExecutionPlan(BaseModel):
     summary: str
 
+    intent: str = "Intenção não identificada"
+
+    intent_confidence: str = "baixa"
+
+    intent_source: list[str] = Field(default_factory=list)
+
+    intent_summary: str = "O MELLO preparou um plano com base nas informações disponíveis."
+
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
+
     documents: list[dict[str, Any]] = Field(default_factory=list)
 
     transformations: list[dict[str, Any]] = Field(default_factory=list)
@@ -232,6 +287,8 @@ class ExecutionPlan(BaseModel):
     open_questions: list[str] = Field(default_factory=list)
 
     outputs: list[str] = Field(default_factory=list)
+
+    output_details: list[dict[str, Any]] = Field(default_factory=list)
 
     approved: bool = False
 

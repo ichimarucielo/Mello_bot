@@ -37,19 +37,31 @@ steps:
 - operation: normalize
   description: ''
   parameters: {}
+  confidence: baixa
+  pending_confirmation: []
 - operation: reconcile
   description: ''
   parameters:
-    key: documento
+    key:
+    - Conta
+    - Nº documento
+  confidence: alta
+  pending_confirmation: []
 pipeline:
   operations:
   - operation: normalize
     description: ''
     parameters: {}
+    confidence: baixa
+    pending_confirmation: []
   - operation: reconcile
     description: ''
     parameters:
-      key: documento
+      key:
+      - Conta
+      - Nº documento
+    confidence: alta
+    pending_confirmation: []
 outputs:
 - conciliacao.xlsx
 - divergencias.xlsx

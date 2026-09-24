@@ -27,6 +27,7 @@ from core.exceptions import ProjectNotFoundError
 from core.execution_service import ExecutionService, StagedUpload
 from core.automation_designer import AutomationDesigner
 from core.models import AutomationRequest
+from core.manifest_generator import ManifestGenerator
 
 app = FastAPI(
     title="MELLO BOT API",
@@ -48,6 +49,9 @@ def analyze_automation(request: AutomationRequest):
     response_model=AIManifestResponse,
 )
 def generate_automation_manifest(request: AutomationRequest):
+    if request.manifest_data:
+        manifest = ManifestGenerator.validate(request.manifest_data)
+        return {"manifest": ManifestGenerator.to_yaml(manifest)}
     return {"manifest": AutomationDesigner().generate_manifest(request.prompt)}
 
 

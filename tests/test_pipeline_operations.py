@@ -1,5 +1,6 @@
 from core.ai_service import MockAIService
 from core.manifest_generator import ManifestGenerator
+from core.models import OperationStep
 from core.pipeline_catalog import SUPPORTED_OPERATIONS, get_operation
 from core.pipeline_validator import PipelineValidator
 
@@ -13,6 +14,8 @@ def test_operation_catalog_is_domain_agnostic_and_categorized():
         "join",
         "reconcile",
         "aggregate",
+        "top_n",
+        "unmatched_records",
         "sort",
         "rename_columns",
         "drop_columns",
@@ -85,3 +88,41 @@ def test_pipeline_validator_checks_operation_parameters():
     assert any("rename_columns requer" in error for error in result["errors"])
     assert any("drop_columns requer" in error for error in result["errors"])
     assert any("reconcile requer" in error for error in result["errors"])
+
+
+def test_operation_step_accepts_null_editor_metadata():
+    legacy_step = OperationStep.model_validate(
+        {
+            "type": "aggregate",
+            "group_by": "regiao",
+            "confidence": None,
+            "pending_confirmation": None,
+        }
+    )
+
+    canonical_step = OperationStep.model_validate(
+        {
+            "operation": "aggregate",
+            "parameters": {"group_by": "regiao"},
+            "confidence": None,
+            "pending_confirmation": None,
+        }
+    )
+
+    for step in (legacy_step, canonical_step):
+        assert step.confidence == "alta"
+        assert step.pending_confirmation == []
+
+
+def test_operation_step_field_defaults_handle_null_metadata_without_structure():
+    step = OperationStep.model_validate(
+        {
+            "operation": "normalize",
+            "parameters": {},
+            "confidence": None,
+            "pending_confirmation": None,
+        }
+    )
+
+    assert step.confidence == "baixa"
+    assert step.pending_confirmation == []

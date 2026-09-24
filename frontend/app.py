@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -324,9 +325,18 @@ def render_mello_ai_page() -> None:
             st.session_state["mello_ai_pipeline_validation"] = st.session_state[
                 "mello_ai_analysis"
             ].get("pipeline_validation", {})
+            st.session_state["mello_ai_reviewed_inputs"] = [
+                dict(item)
+                for item in st.session_state["mello_ai_manifest_data"].get(
+                    "required_files", []
+                )
+            ]
             st.session_state["mello_ai_approved"] = False
             st.session_state.pop("mello_ai_project", None)
             st.session_state.pop("mello_ai_manifest", None)
+            for key in list(st.session_state):
+                if key.startswith("mello_ai_input_"):
+                    st.session_state.pop(key)
             st.success("Processo analisado com sucesso.")
         except RuntimeError as error:
             st.error(str(error))
@@ -334,7 +344,16 @@ def render_mello_ai_page() -> None:
     if manifest_clicked:
         log_automation_event("ai_manifest_requested")
         try:
-            response = call_ai_api("/ai/manifest", prompt)
+            response = call_ai_api(
+                "/ai/manifest",
+                prompt,
+                payload={
+                    "prompt": prompt,
+                    "manifest_data": st.session_state.get(
+                        "mello_ai_manifest_data"
+                    ),
+                },
+            )
             st.session_state["mello_ai_manifest"] = response["manifest"]
             st.success("Manifesto gerado com sucesso.")
         except (RuntimeError, KeyError) as error:
@@ -382,10 +401,31 @@ def render_mello_ai_page() -> None:
             f"{understanding.get('operation_count', len(analysis.get('steps', [])))} operações · "
             f"{understanding.get('output_count', len(analysis.get('outputs', [])))} outputs"
         )
+        manifest_data = st.session_state.get("mello_ai_manifest_data", {})
         execution_plan = analysis.get("execution_plan", {})
         if execution_plan:
             st.subheader("Execution Plan")
             st.caption(execution_plan.get("summary", "Plano de execução sugerido."))
+            intent_col, confidence_col, source_col = st.columns(3)
+            intent_col.metric(
+                "Intenção",
+                execution_plan.get("intent", "Não identificada"),
+            )
+            confidence_col.metric(
+                "Confiança",
+                execution_plan.get("intent_confidence", "baixa").capitalize(),
+            )
+            source_col.metric(
+                "Origem",
+                ", ".join(execution_plan.get("intent_source", [])) or "nenhuma",
+            )
+            st.write(
+                "**Resumo para aprovação**: "
+                + execution_plan.get(
+                    "intent_summary",
+                    "O MELLO preparou um plano com base nas informações disponíveis.",
+                )
+            )
             plan_documents, plan_transformations = st.columns(2)
             with plan_documents:
                 st.write("**Documentos identificados**")
@@ -397,20 +437,65 @@ def render_mello_ai_page() -> None:
                     )
             with plan_transformations:
                 st.write("**Transformações**")
-                for transformation in execution_plan.get("transformations", []):
+                decisions = execution_plan.get("decisions", [])
+                transformations = decisions or execution_plan.get("transformations", [])
+                quality_rules = [
+                    transformation
+                    for transformation in transformations
+                    if transformation.get("operation") in {"remove_nulls", "drop_nulls", "validate"}
+                ]
+                for transformation in transformations:
+                    if transformation in quality_rules:
+                        continue
                     parameters = transformation.get(
                         "parameters",
                         transformation.get("details", {}),
                     )
                     suffix = f" — {parameters}" if parameters else ""
                     st.write(
-                        f"{transformation.get('order', '-')}. "
+                        f"{transformation.get('order', '')} "
                         f"{transformation.get('description', transformation.get('label', transformation.get('operation', '-')))}"
                         f"{suffix}"
                     )
+                    st.caption(
+                        f"Motivo: {transformation.get('reason', 'operação prevista no plano')} · "
+                        f"Confiança: {transformation.get('confidence', 'baixa')} · "
+                        f"Origem: {', '.join(transformation.get('source', [])) or 'nenhuma'}"
+                    )
+                    pending = transformation.get("pending_confirmation", [])
+                    if pending:
+                        st.warning("Pendente: " + ", ".join(pending))
+                if quality_rules:
+                    st.write("**Regras de qualidade**")
+                    for rule in quality_rules:
+                        parameters = rule.get("parameters", rule.get("details", {}))
+                        if rule.get("operation") in {"remove_nulls", "drop_nulls"}:
+                            st.write(
+                                "- Remover registros com "
+                                f"**{parameters.get('column', 'valor não informado')}** vazio"
+                            )
+                        else:
+                            st.write("- Validar a qualidade dos dados")
+            pending_questions = execution_plan.get("open_questions", [])
+            if pending_questions:
+                st.warning("**Pendências**\n\n" + "\n".join(f"- {item}" for item in pending_questions))
+            risks = execution_plan.get("risks", [])
+            if risks:
+                st.error("**Riscos**\n\n" + "\n".join(f"- {item}" for item in risks))
             st.write("**Outputs**")
-            st.write(", ".join(execution_plan.get("outputs", [])) or "Nenhum output definido.")
-        manifest_data = st.session_state.get("mello_ai_manifest_data", {})
+            workbook_sheets = manifest_data.get("workbook_sheets", [])
+            if manifest_data.get("output_mode") == "workbook" and workbook_sheets:
+                st.write(f"**Workbook:** `{manifest_data.get('workbook_name', 'resultado.xlsx')}`")
+                st.write("**Abas**")
+                for sheet in workbook_sheets:
+                    st.write(f"- {sheet.rsplit('.', 1)[0].replace('_', ' ').title()}")
+            else:
+                output_details = execution_plan.get("output_details", [])
+                if output_details:
+                    for output in output_details:
+                        st.write(f"- **{output.get('name', '-')}**: {output.get('reason', 'output previsto')}")
+                else:
+                    st.write(", ".join(execution_plan.get("outputs", [])) or "Nenhum output definido.")
         edited_project_name = st.text_input(
             "Nome do projeto",
             value=manifest_data.get("name", analysis.get("project_name", "")),
@@ -425,17 +510,154 @@ def render_mello_ai_page() -> None:
         )
         input_col, output_col = st.columns(2)
         with input_col:
-            st.write("**Inputs identificados**")
-            for item in analysis.get("inputs", []):
-                st.write(
-                    f"- `{item.get('id', '-')}`: {item.get('display_name', '-') } "
-                    f"({', '.join(item.get('accepted_extensions', [item.get('extension', '-')]))})"
-                )
-                critical_columns = item.get("critical_columns", [])
-                if critical_columns:
-                    st.caption(
-                        f"Colunas críticas: {', '.join(critical_columns)}"
+            st.write("**Confirmar inputs**")
+            st.caption(
+                "Edite cada documento, remova sugestões incorretas ou adicione o que faltou."
+            )
+            reviewed_inputs = st.session_state.setdefault(
+                "mello_ai_reviewed_inputs",
+                [dict(item) for item in manifest_data.get("required_files", [])],
+            )
+            updated_inputs = []
+            input_errors = []
+            input_formats = ["xlsx", "csv", "xls", "json"]
+            for index, input_file in enumerate(reviewed_inputs):
+                input_key = re.sub(
+                    r"[^a-z0-9]+",
+                    "_",
+                    str(input_file.get("id", f"input_{index}")).lower(),
+                ).strip("_") or f"input_{index}"
+                with st.container(border=True):
+                    title_col, remove_col = st.columns([5, 1])
+                    title_col.write(
+                        f"**Documento {index + 1}:** "
+                        f"{input_file.get('display_name', 'Sem nome')}"
                     )
+                    remove_clicked = remove_col.button(
+                        "Remover",
+                        icon=":material/delete:",
+                        key=f"mello_ai_input_remove_{input_key}",
+                        width="stretch",
+                    )
+                    if remove_clicked:
+                        reviewed_inputs.pop(index)
+                        for key in list(st.session_state):
+                            if key.startswith("mello_ai_input_"):
+                                st.session_state.pop(key)
+                        st.session_state["mello_ai_approved"] = False
+                        st.rerun()
+                    id_col, name_col, format_col = st.columns([2, 3, 2])
+                    raw_id = id_col.text_input(
+                        "ID",
+                        value=input_file.get("id", ""),
+                        key=f"mello_ai_input_id_{input_key}",
+                    )
+                    display_name = name_col.text_input(
+                        "Nome",
+                        value=input_file.get("display_name", ""),
+                        key=f"mello_ai_input_name_{input_key}",
+                    )
+                    current_format = next(
+                        iter(input_file.get("accepted_extensions", [])),
+                        "xlsx",
+                    )
+                    format_index = (
+                        input_formats.index(current_format)
+                        if current_format in input_formats
+                        else 0
+                    )
+                    extension = format_col.selectbox(
+                        "Formato",
+                        options=input_formats,
+                        index=format_index,
+                        key=f"mello_ai_input_format_{input_key}",
+                    )
+                    critical_columns = st.text_input(
+                        "Colunas críticas",
+                        value=", ".join(input_file.get("critical_columns", [])),
+                        placeholder="Ex.: cnpj, valor",
+                        key=f"mello_ai_input_columns_{input_key}",
+                    )
+                    input_id = re.sub(
+                        r"[^a-z0-9]+", "_", raw_id.lower()
+                    ).strip("_")
+                    if not input_id or not display_name.strip():
+                        input_errors.append("Cada input precisa de ID e nome.")
+                        continue
+                    updated_inputs.append(
+                        {
+                            "id": input_id,
+                            "display_name": display_name.strip(),
+                            "cli_argument": f"--{input_id.replace('_', '-')}",
+                            "accepted_extensions": [extension],
+                            "critical_columns": [
+                                column.strip()
+                                for column in critical_columns.split(",")
+                                if column.strip()
+                            ],
+                            "required_columns": input_file.get(
+                                "required_columns", []
+                            ),
+                        }
+                    )
+            st.write("**Adicionar documento**")
+            with st.form("mello_ai_add_input", border=False, clear_on_submit=True):
+                new_id_col, new_name_col, new_format_col = st.columns([2, 3, 2])
+                new_id = new_id_col.text_input(
+                    "ID do documento",
+                    placeholder="metas_comerciais",
+                )
+                new_name = new_name_col.text_input(
+                    "Nome do documento",
+                    placeholder="Metas Comerciais",
+                )
+                new_extension = new_format_col.selectbox(
+                    "Formato do documento",
+                    options=input_formats,
+                )
+                new_critical_columns = st.text_input(
+                    "Colunas críticas do documento",
+                    placeholder="Ex.: regiao, meta",
+                )
+                add_document = st.form_submit_button(
+                    "Adicionar documento",
+                    icon=":material/add:",
+                    width="stretch",
+                )
+            if add_document:
+                new_input_id = re.sub(
+                    r"[^a-z0-9]+", "_", new_id.lower()
+                ).strip("_")
+                existing_ids = {item["id"] for item in updated_inputs}
+                if not new_input_id or not new_name.strip():
+                    st.error("Informe o ID e o nome do documento para adicioná-lo.")
+                elif new_input_id in existing_ids:
+                    st.error("Já existe um documento com esse ID.")
+                else:
+                    reviewed_inputs.append(
+                        {
+                            "id": new_input_id,
+                            "display_name": new_name.strip(),
+                            "cli_argument": f"--{new_input_id.replace('_', '-')}",
+                            "accepted_extensions": [new_extension],
+                            "critical_columns": [
+                                column.strip()
+                                for column in new_critical_columns.split(",")
+                                if column.strip()
+                            ],
+                            "required_columns": [],
+                        }
+                    )
+                    st.session_state["mello_ai_approved"] = False
+                    st.rerun()
+            if updated_inputs != reviewed_inputs:
+                st.session_state["mello_ai_approved"] = False
+                st.session_state["mello_ai_reviewed_inputs"] = updated_inputs
+            if not updated_inputs:
+                input_errors.append("Confirme pelo menos um input para criar o projeto.")
+            if len({item["id"] for item in updated_inputs}) != len(updated_inputs):
+                input_errors.append("Os IDs dos inputs precisam ser únicos.")
+            manifest_data["required_files"] = updated_inputs
         with output_col:
             st.write("**Outputs editáveis**")
             output_mode = st.radio(
@@ -489,6 +711,12 @@ def render_mello_ai_page() -> None:
                 manifest_data["workbook_name"] = workbook_name
                 manifest_data["outputs"] = [workbook_name]
         pipeline_validation = PipelineValidator.validate(manifest_data)
+        if input_errors:
+            pipeline_validation = {
+                **pipeline_validation,
+                "valid": False,
+                "errors": pipeline_validation["errors"] + input_errors,
+            }
         st.session_state["mello_ai_pipeline_validation"] = pipeline_validation
         st.write("**Validação do pipeline**")
         if pipeline_validation["valid"]:
@@ -514,6 +742,12 @@ def render_mello_ai_page() -> None:
             else edited_steps
         )
         pipeline_validation = PipelineValidator.validate(manifest_data)
+        if input_errors:
+            pipeline_validation = {
+                **pipeline_validation,
+                "valid": False,
+                "errors": pipeline_validation["errors"] + input_errors,
+            }
         st.session_state["mello_ai_pipeline_validation"] = pipeline_validation
         st.session_state["mello_ai_manifest_data"] = manifest_data
         st.divider()

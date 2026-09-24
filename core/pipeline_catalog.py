@@ -35,6 +35,15 @@ SUPPORTED_OPERATIONS = (
         ("agrupar", "agrupe por", "somar por", "totalizar", "resumo"),
         required_parameters=("group_by",),
     ),
+    OperationDefinition(
+        "top_n", "Seleciona os maiores registros de um agrupamento.",
+        ("maiores", "top", "ranking", "principais"),
+        required_parameters=("group_by", "limit"),
+    ),
+    OperationDefinition(
+        "unmatched_records", "Identifica registros sem correspondência em outra base.",
+        ("sem cliente cadastrado", "sem correspondencia", "nao encontrado"),
+    ),
     OperationDefinition("sort", "Ordena registros.", ("ordenar", "ordenado", "sort")),
     OperationDefinition(
         "rename_columns", "Renomeia colunas.",
