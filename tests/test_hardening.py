@@ -15,7 +15,7 @@ def test_empty_csv_is_reported_clearly(tmp_path: Path):
     file_path = tmp_path / "empty.csv"
     file_path.write_text("", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Arquivo sem colunas"):
+    with pytest.raises(ValueError, match="O arquivo está vazio"):
         Validator.get_columns(file_path)
 
 

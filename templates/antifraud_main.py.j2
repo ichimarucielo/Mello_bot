@@ -1,45 +1,152 @@
-import argparse
+import pandas as pd
 import logging
 from pathlib import Path
+import argparse
+from typing import List, Dict, Any, Optional
+from core.utils import detect_key_type, validate_key_format, standardize_column_names
 
-import pandas as pd
-
-
-REQUIRED_FILES = {{ REQUIRED_FILES }}
-OUTPUTS = {{ OUTPUTS }}
-PIPELINE_STEPS = {{ STEPS }}
-OUTPUT_FOLDER = {{ OUTPUT_FOLDER }}
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Script de detecção de fraudes")
+    parser.add_argument("--input", required=True, help="Arquivo de entrada")
+    parser.add_argument("--output", required=True, help="Arquivo de saída")
+    parser.add_argument("--rules", required=True, help="Arquivo com regras de fraudes (JSON)")
+    parser.add_argument("--flag_column", default="is_fraud", 
+                       help="Nome da coluna de flag de fraude (padrão: is_fraud)")
+    parser.add_argument("--score_column", default="fraud_score",
+                       help="Nome da coluna de score (padrão: fraud_score)")
+    return parse_args()
 
-def read_input(file_path: str) -> pd.DataFrame:
-    path = Path(file_path)
-    if path.suffix.lower() == ".csv":
-        return pd.read_csv(path, sep=";")
-    return pd.read_excel(path)
+def load_data(file_path: Path) -> pd.DataFrame:
+    """Carrega dados do arquivo suportando CSV e XLSX"""
+    if file_path.suffix.lower() == '.csv':
+        df = pd.read_csv(file_path, sep=';')
+    elif file_path.suffix.lower() in ['.xlsx', '.xls']:
+        df = pd.read_excel(file_path)
+    else:
+        raise ValueError(f"Formato não suportado: {file_path.suffix}")
+    
+    # Padroniza nomes de colunas
+    return standardize_column_names(df)
 
+def load_rules(rules_file: Path) -> Dict[str, Any]:
+    """Carrega regras de detecção de fraudes"""
+    import json
+    with open(rules_file, 'r', encoding='utf-8') as f:
+        return json.load(f)
 
-def validate_input(data: pd.DataFrame) -> pd.DataFrame:
-    if data.empty:
-        raise ValueError("A base antifraude esta vazia.")
-    return data.copy()
+def validate_inputs(df: pd.DataFrame, rules: Dict[str, Any]) -> None:
+    """Valida se as colunas necessárias existem"""
+    # Verifica colunas obrigatórias nas regras
+    for rule in rules.get('rules', []):
+        for column in rule.get('columns', []):
+            if column not in df.columns:
+                raise ValueError(f"Coluna '{column}' não encontrada nos dados")
+        
+        # Valida chaves sensíveis
+        if 'key' in rule:
+            key_type = detect_key_type(rule['key'])
+            if key_type:
+                invalid = df[~df[rule['key']].apply(lambda x: validate_key_format(str(x), key_type))]
+                if not invalid.empty:
+                    logger.warning(f"Chave '{rule['key']}' tem {len(invalid)} registros inválidos")
 
+def apply_rules(df: pd.DataFrame, rules: Dict[str, Any]) -> pd.DataFrame:
+    """Aplica regras de detecção de fraudes"""
+    df = df.copy()
+    df['is_fraud'] = False
+    df['fraud_score'] = 0.0
+    
+    for rule in rules.get('rules', []):
+        rule_type = rule.get('type')
+        columns = rule.get('columns', [])
+        threshold = rule.get('threshold', 0)
+        weight = rule.get('weight', 1.0)
+        
+        if rule_type == 'frequency':
+            # Regra de frequência
+            counts = df[columns[0]].value_counts()
+            mask = df[columns[0]].map(counts) > threshold
+            df.loc[mask, 'is_fraud'] = True
+            df.loc[mask, 'fraud_score'] += weight
+            
+        elif rule_type == 'pattern':
+            # Regra de padrão
+            pattern = rule.get('pattern')
+            mask = df[columns[0]].str.contains(pattern, case=False, na=False)
+            df.loc[mask, 'is_fraud'] = True
+            df.loc[mask, 'fraud_score'] += weight
+            
+        elif rule_type == 'value':
+            # Regra de valor
+            operator = rule.get('operator', '>')
+            mask = False
+            
+            if operator == '>':
+                mask = df[columns[0]] > threshold
+            elif operator == '<':
+                mask = df[columns[0]] < threshold
+            elif operator == '==':
+                mask = df[columns[0]] == threshold
+            
+            df.loc[mask, 'is_fraud'] = True
+            df.loc[mask, 'fraud_score'] += weight
+    
+    return df
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description={{ PROJECT_NAME }})
-    for required_file in REQUIRED_FILES:
-        parser.add_argument(required_file["cli_argument"], required=True)
-    args = parser.parse_args()
-    data = validate_input(read_input(getattr(args, REQUIRED_FILES[0]["argument_name"])))
+def generate_report(df: pd.DataFrame) -> Dict[str, Any]:
+    """Gera estatísticas da detecção"""
+    total = len(df)
+    frauds = df['is_fraud'].sum()
+    score_stats = df['fraud_score'].describe()
+    
+    return {
+        'total_records': total,
+        'fraud_records': frauds,
+        'fraud_percentage': (frauds / total) * 100 if total > 0 else 0,
+        'score_stats': score_stats.to_dict()
+    }
 
-    # TODO: implementar score, regras de risco e classificacao antifraude.
-    output_folder = Path(OUTPUT_FOLDER)
-    output_folder.mkdir(parents=True, exist_ok=True)
-    for output_name in OUTPUTS:
-        data.to_excel(output_folder / output_name, index=False)
-    logger.info("Base antifraude preparada: %s", {{ PROJECT_ID }})
-
+def main():
+    args = parse_args()
+    
+    try:
+        # Carrega dados e regras
+        logger.info(f"Carregando arquivo: {args.input}")
+        df = load_data(Path(args.input))
+        
+        logger.info(f"Carregando regras: {args.rules}")
+        rules = load_rules(Path(args.rules))
+        
+        # Valida inputs
+        validate_inputs(df, rules)
+        
+        # Aplica regras
+        logger.info("Aplicando regras de detecção")
+        result = apply_rules(df, rules)
+        
+        # Gera relatório
+        report = generate_report(result)
+        
+        # Adiciona relatório como nova coluna
+        result['report'] = str(report)
+        
+        # Salva resultado
+        output_path = Path(args.output)
+        logger.info(f"Salvando resultado em: {output_path}")
+        
+        if output_path.suffix.lower() == '.csv':
+            result.to_csv(output_path, index=False, sep=';')
+        else:
+            result.to_excel(output_path, index=False)
+            
+        logger.info("Detecção de fraudes concluída!")
+        logger.info(f"Estatísticas: {report}")
+        
+    except Exception as e:
+        logger.error(f"Erro na detecção de fraudes: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()

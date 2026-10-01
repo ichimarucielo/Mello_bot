@@ -74,6 +74,7 @@ def test_pipeline_assistant_creates_manifest_steps_and_derived_outputs():
         "calculate",
         "aggregate",
         "reconcile",
+        "validate",
     ]
     assert analysis.steps[2]["value"] == "2026-07"
     assert analysis.steps[3] == {
@@ -185,7 +186,7 @@ def test_pipeline_validator_rejects_join_without_two_inputs():
     })
 
     assert result["valid"] is False
-    assert "Join requer pelo menos duas entradas." in result["errors"][0]
+    assert "Passo join: requer pelo menos duas entradas." in result["errors"][0]
 
 
 def test_pipeline_validator_accepts_two_input_join():
@@ -222,6 +223,9 @@ def test_generic_business_documents_support_join_review():
     )
 
     assert [item["id"] for item in analysis.inputs] == ["vendas", "clientes"]
-    assert [step["type"] for step in analysis.steps] == ["join", "aggregate"]
-    assert analysis.outputs == ["resumo_clientes.xlsx"]
+    assert [step["type"] for step in analysis.steps] == ["join"]
+    assert analysis.outputs == ["resultado.xlsx"]
     assert analysis.pipeline_validation["valid"] is True
+    assert analysis.execution_plan is not None
+    assert analysis.execution_plan.suggestions[0]["operation"] == "aggregate"
+    assert analysis.execution_plan.suggestions[0]["requires_confirmation"] is True

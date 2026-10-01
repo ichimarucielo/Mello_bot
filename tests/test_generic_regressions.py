@@ -9,8 +9,36 @@ def test_generic_sales_and_inventory_pipeline_is_not_domain_specific():
     )
 
     assert [item["id"] for item in analysis.inputs] == ["vendas", "estoque"]
-    assert [step["type"] for step in analysis.steps] == ["join", "aggregate"]
+    assert [step["type"] for step in analysis.steps] == ["join"]
     assert analysis.pipeline_validation["valid"] is True
+    assert analysis.execution_plan is not None
+    assert analysis.execution_plan.suggestions[0]["operation"] == "aggregate"
+    assert analysis.execution_plan.suggestions[0]["requires_confirmation"] is True
+
+
+def test_explicit_grouping_is_a_pipeline_step_not_a_suggestion():
+    analysis = MockAIService().analyze(
+        "Recebo uma planilha de vendas. Quero agrupar por cliente."
+    )
+
+    aggregate = next(step for step in analysis.steps if step.operation == "aggregate")
+    assert aggregate.parameters["group_by"] == "cliente"
+    assert analysis.execution_plan is not None
+    assert analysis.execution_plan.suggestions == []
+
+
+def test_profile_grouping_candidate_stays_optional_until_confirmation():
+    analysis = MockAIService().analyze(
+        "Recebo dois relatórios ZSD008, um antigo e um novo. "
+        "Quero comparar."
+    )
+
+    assert not any(step.operation == "aggregate" for step in analysis.steps)
+    assert analysis.execution_plan is not None
+    suggestion = analysis.execution_plan.suggestions[0]
+    assert suggestion["parameters"]["group_by"] == "Razão Social"
+    assert suggestion["source"] == ["perfil"]
+    assert suggestion["requires_confirmation"] is True
 
 
 def test_generic_customer_period_inputs_are_supported():
@@ -96,6 +124,7 @@ def test_execution_plan_does_not_invent_keys_or_groupings():
         "Preciso comparar dois arquivos CSV e gerar um resultado."
     )
 
+    assert analysis.execution_plan is not None
     transformations = analysis.execution_plan.transformations
     assert any(
         item["operation"] == "reconcile"
@@ -108,6 +137,60 @@ def test_execution_plan_does_not_invent_keys_or_groupings():
     assert "'grupo'" not in serialized
     assert "'itens'" not in serialized
     assert "'saldo'" not in serialized
+
+
+def test_explicit_fs10n_reconciliation_uses_only_requested_key_and_quality_steps():
+    analysis = MockAIService().analyze(
+        "Recebo FS10N e Billing. Quero conciliar usando Conta e Nº documento."
+    )
+
+    assert analysis.pattern == "reconciliation"
+    assert [step.operation for step in analysis.steps] == [
+        "normalize",
+        "reconcile",
+        "validate",
+    ]
+    assert analysis.steps[1].parameters["key"] == ["Conta", "Nº documento"]
+    reconcile = next(
+        decision
+        for decision in analysis.execution_plan.decisions
+        if decision["operation"] == "reconcile"
+    )
+    assert reconcile["source"] == ["prompt"]
+
+
+def test_explicit_key_overrides_profile_key():
+    analysis = MockAIService().analyze(
+        "Recebo ZSD008 e Billing. Quero conciliar usando CNPJ."
+    )
+
+    reconcile_step = next(step for step in analysis.steps if step.operation == "reconcile")
+    reconcile_decision = next(
+        decision
+        for decision in analysis.execution_plan.decisions
+        if decision["operation"] == "reconcile"
+    )
+    assert reconcile_step.parameters["key"] == "cnpj"
+    assert reconcile_decision["source"] == ["prompt"]
+
+
+def test_period_comparison_does_not_add_unrequested_aggregations():
+    analysis = MockAIService().analyze(
+        "Recebo dois relatórios ZSD008, um antigo e um novo. Quero comparar."
+    )
+
+    assert [step.operation for step in analysis.steps] == [
+        "normalize",
+        "reconcile",
+        "validate",
+    ]
+    assert not any(step.operation == "aggregate" for step in analysis.steps)
+    reconcile = next(
+        decision
+        for decision in analysis.execution_plan.decisions
+        if decision["operation"] == "reconcile"
+    )
+    assert reconcile["source"] == ["perfil"]
 
 
 def test_period_outputs_require_period_comparison_intent():
@@ -128,9 +211,12 @@ def test_execution_plan_exposes_confidence_sources_risks_and_output_reasons():
     analysis = MockAIService().analyze(
         "Preciso reconciliar duas bases financeiras."
     )
+    assert analysis.execution_plan is not None
     plan = analysis.execution_plan
 
     assert plan.intent == "Conciliação de dados"
+    assert plan.pattern == "reconciliation"
+    assert "pedido menciona" in plan.pattern_reason
     assert plan.intent_confidence == "alta"
     assert plan.intent_source == ["prompt"]
     assert plan.intent_summary.startswith("O MELLO entendeu")
@@ -140,6 +226,12 @@ def test_execution_plan_exposes_confidence_sources_risks_and_output_reasons():
     assert reconcile["confidence"] == "baixa"
     assert reconcile["pending_confirmation"] == ["chave_conciliacao"]
     assert reconcile["source"] == []
+
+    normalize = next(item for item in plan.decisions if item["operation"] == "normalize")
+    validate = next(item for item in plan.decisions if item["operation"] == "validate")
+    for automatic_step in (normalize, validate):
+        assert automatic_step["confidence"] == "alta"
+        assert automatic_step["source"] == ["regra_da_plataforma"]
 
 
 def test_multi_step_sales_report_prompt_builds_rich_execution_plan():
@@ -159,6 +251,7 @@ def test_multi_step_sales_report_prompt_builds_rich_execution_plan():
     )
 
     analysis = MockAIService().analyze(prompt)
+    assert analysis.execution_plan is not None
 
     operations = [step.operation for step in analysis.steps]
     assert operations == [
@@ -214,3 +307,21 @@ def test_multi_step_sales_report_prompt_builds_rich_execution_plan():
         "gerar rankings dos maiores resultados e produzir um resumo executivo "
         "com diagnóstico. Tudo será entregue em um único arquivo Excel."
     )
+
+
+def test_prompted_workbook_sheet_names_are_preserved_in_manifest():
+    analysis = MockAIService().analyze(
+        "Recebo FS10N e Billing em um único workbook com as abas: "
+        "Resumo Executivo, Conciliados, Divergências, Apenas FS10N e Apenas Billing."
+    )
+
+    assert analysis.outputs == [
+        "Resumo Executivo",
+        "Conciliados",
+        "Divergências",
+        "Apenas FS10N",
+        "Apenas Billing",
+    ]
+    assert analysis.manifest_data["output_mode"] == "workbook"
+    assert analysis.manifest_data["outputs"] == ["resultado.xlsx"]
+    assert analysis.manifest_data["workbook_sheets"] == analysis.outputs

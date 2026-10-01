@@ -168,7 +168,7 @@ class OperationStep(BaseModel):
         default_confidence = "baixa" if pending or not has_evidence else "alta"
         return {
             "operation": operation,
-            "description": value.get("description", ""),
+            "description": value.get("description") or "",
             "parameters": parameters,
             "confidence": value.get("confidence") or default_confidence,
             "pending_confirmation": pending,
@@ -264,6 +264,10 @@ class ExecutionContext(BaseModel):
 class ExecutionPlan(BaseModel):
     summary: str
 
+    pattern: str = "generic"
+
+    pattern_reason: str = ""
+
     intent: str = "Intenção não identificada"
 
     intent_confidence: str = "baixa"
@@ -273,6 +277,8 @@ class ExecutionPlan(BaseModel):
     intent_summary: str = "O MELLO preparou um plano com base nas informações disponíveis."
 
     decisions: list[dict[str, Any]] = Field(default_factory=list)
+
+    suggestions: list[dict[str, Any]] = Field(default_factory=list)
 
     documents: list[dict[str, Any]] = Field(default_factory=list)
 

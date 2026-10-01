@@ -1,45 +1,190 @@
-import argparse
+import pandas as pd
 import logging
 from pathlib import Path
+import argparse
+from typing import List, Dict, Any, Optional
+from core.utils import detect_key_type, validate_key_format, standardize_column_names
 
-import pandas as pd
-
-
-REQUIRED_FILES = {{ REQUIRED_FILES }}
-OUTPUTS = {{ OUTPUTS }}
-PIPELINE_STEPS = {{ STEPS }}
-OUTPUT_FOLDER = {{ OUTPUT_FOLDER }}
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Script de validação de dados")
+    parser.add_argument("--input", required=True, help="Arquivo de entrada")
+    parser.add_argument("--output", required=True, help="Arquivo de saída")
+    parser.add_argument("--rules", required=True, help="Arquivo com regras de validação (JSON)")
+    parser.add_argument("--report_only", action="store_true", 
+                       help="Gera apenas relatório sem arquivo de saída")
+    return parse_args()
 
-def read_input(file_path: str) -> pd.DataFrame:
-    path = Path(file_path)
-    if path.suffix.lower() == ".csv":
-        return pd.read_csv(path, sep=";")
-    return pd.read_excel(path)
+def load_data(file_path: Path) -> pd.DataFrame:
+    """Carrega dados do arquivo suportando CSV e XLSX"""
+    if file_path.suffix.lower() == '.csv':
+        df = pd.read_csv(file_path, sep=';')
+    elif file_path.suffix.lower() in ['.xlsx', '.xls']:
+        df = pd.read_excel(file_path)
+    else:
+        raise ValueError(f"Formato não suportado: {file_path.suffix}")
+    
+    # Padroniza nomes de colunas
+    return standardize_column_names(df)
 
+def load_rules(rules_file: Path) -> Dict[str, Any]:
+    """Carrega regras de validação"""
+    import json
+    with open(rules_file, 'r', encoding='utf-8') as f:
+        return json.load(f)
 
-def validate_input(data: pd.DataFrame) -> pd.DataFrame:
-    if data.empty:
-        raise ValueError("O arquivo de entrada esta vazio.")
-    return data.copy()
+def validate_inputs(df: pd.DataFrame, rules: Dict[str, Any]) -> None:
+    """Valida se as colunas necessárias existem"""
+    # Verifica colunas obrigatórias nas regras
+    for rule in rules.get('rules', []):
+        for column in rule.get('columns', []):
+            if column not in df.columns:
+                raise ValueError(f"Coluna '{column}' não encontrada nos dados")
 
+def apply_validation_rules(df: pd.DataFrame, rules: Dict[str, Any]) -> Dict[str, Any]:
+    """Aplica regras de validação e retorna estatísticas"""
+    validation_stats = {
+        'total_records': len(df),
+        'valid_records': 0,
+        'invalid_records': 0,
+        'rule_results': [],
+        'error_details': []
+    }
+    
+    for rule in rules.get('rules', []):
+        rule_type = rule.get('type')
+        columns = rule.get('columns', [])
+        rule_name = rule.get('name', 'Regra sem nome')
+        
+        if rule_type == 'required':
+            # Valida campos obrigatórios
+            mask = df[columns].notna().all(axis=1)
+            invalid_count = (~mask).sum()
+            
+            validation_stats['rule_results'].append({
+                'rule': rule_name,
+                'type': 'required',
+                'valid': invalid_count == 0,
+                'invalid_count': invalid_count
+            })
+            
+            if invalid_count > 0:
+                validation_stats['error_details'].extend(
+                    df[~mask].index.tolist()
+                )
+                
+        elif rule_type == 'format':
+            # Valida formato de campos
+            key_type = detect_key_type(columns[0])
+            if key_type:
+                mask = df[columns[0]].apply(lambda x: validate_key_format(str(x), key_type))
+                invalid_count = (~mask).sum()
+                
+                validation_stats['rule_results'].append({
+                    'rule': rule_name,
+                    'type': 'format',
+                    'valid': invalid_count == 0,
+                    'invalid_count': invalid_count
+                })
+                
+                if invalid_count > 0:
+                    validation_stats['error_details'].extend(
+                        df[~mask].index.tolist()
+                    )
+                    
+        elif rule_type == 'range':
+            # Valida intervalo de valores
+            min_val = rule.get('min')
+            max_val = rule.get('max')
+            
+            if min_val is not None and max_val is not None:
+                mask = (df[columns[0]] >= min_val) & (df[columns[0]] <= max_val)
+                invalid_count = (~mask).sum()
+            elif min_val is not None:
+                mask = df[columns[0]] >= min_val
+                invalid_count = (~mask).sum()
+            elif max_val is not None:
+                mask = df[columns[0]] <= max_val
+                invalid_count = (~mask).sum()
+            else:
+                invalid_count = 0
+                
+            validation_stats['rule_results'].append({
+                'rule': rule_name,
+                'type': 'range',
+                'valid': invalid_count == 0,
+                'invalid_count': invalid_count
+            })
+            
+            if invalid_count > 0:
+                validation_stats['error_details'].extend(
+                    df[~mask].index.tolist()
+                )
+    
+    # Calcula totais
+    validation_stats['invalid_records'] = len(set(validation_stats['error_details']))
+    validation_stats['valid_records'] = validation_stats['total_records'] - validation_stats['invalid_records']
+    
+    return validation_stats
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description={{ PROJECT_NAME }})
-    for required_file in REQUIRED_FILES:
-        parser.add_argument(required_file["cli_argument"], required=True)
-    args = parser.parse_args()
-    data = validate_input(read_input(getattr(args, REQUIRED_FILES[0]["argument_name"])))
+def generate_report(df: pd.DataFrame, validation_stats: Dict[str, Any]) -> pd.DataFrame:
+    """Gera relatório de validação"""
+    report_df = df.copy()
+    
+    # Adiciona coluna de validação
+    report_df['is_valid'] = True
+    if validation_stats['error_details']:
+        report_df.loc[validation_stats['error_details'], 'is_valid'] = False
+    
+    # Adiciona estatísticas
+    report_df['validation_stats'] = str(validation_stats)
+    
+    return report_df
 
-    # TODO: implementar regras de validacao especificas do processo.
-    output_folder = Path(OUTPUT_FOLDER)
-    output_folder.mkdir(parents=True, exist_ok=True)
-    for output_name in OUTPUTS:
-        data.to_excel(output_folder / output_name, index=False)
-    logger.info("Validacao base concluida: %s", {{ PROJECT_ID }})
-
+def main():
+    args = parse_args()
+    
+    try:
+        # Carrega dados e regras
+        logger.info(f"Carregando arquivo: {args.input}")
+        df = load_data(Path(args.input))
+        
+        logger.info(f"Carregando regras: {args.rules}")
+        rules = load_rules(Path(args.rules))
+        
+        # Valida inputs
+        validate_inputs(df, rules)
+        
+        # Aplica regras de validação
+        logger.info("Aplicando regras de validação")
+        validation_stats = apply_validation_rules(df, rules)
+        
+        # Gera relatório
+        report_df = generate_report(df, validation_stats)
+        
+        # Salva resultado ou apenas gera relatório
+        if not args.report_only:
+            output_path = Path(args.output)
+            logger.info(f"Salvando resultado em: {output_path}")
+            
+            if output_path.suffix.lower() == '.csv':
+                report_df.to_csv(output_path, index=False, sep=';')
+            else:
+                report_df.to_excel(output_path, index=False)
+        
+        # Imprime estatísticas
+        logger.info("Validação concluída!")
+        logger.info(f"Registros válidos: {validation_stats['valid_records']}")
+        logger.info(f"Registros inválidos: {validation_stats['invalid_records']}")
+        
+        for result in validation_stats['rule_results']:
+            status = "VÁLIDA" if result['valid'] else "INVÁLIDA"
+            logger.info(f"Regra '{result['rule']}': {status} ({result['invalid_count']} registros inválidos)")
+        
+    except Exception as e:
+        logger.error(f"Erro na validação: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()

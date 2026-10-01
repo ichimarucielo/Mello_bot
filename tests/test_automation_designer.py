@@ -25,6 +25,14 @@ from core.registry import load_projects
 PROMPT = "Recebo diariamente um relatório FS10N exportado do SAP e um relatório de Billing."
 
 
+def isolate_generated_manifests(tmp_path: Path, monkeypatch) -> Path:
+    manifest_dir = tmp_path / "manifests"
+    monkeypatch.setattr("core.automation_designer.MANIFESTS_DIR", manifest_dir)
+    monkeypatch.setattr("core.manifest_loader.MANIFESTS_PATH", manifest_dir)
+    monkeypatch.setattr("core.registry.MANIFESTS_DIR", manifest_dir)
+    return manifest_dir
+
+
 def test_mock_ai_service_returns_structured_analysis():
     analysis = MockAIService().analyze(PROMPT)
 
@@ -172,12 +180,15 @@ def test_designer_creates_project_artifacts_and_executable_main(
     monkeypatch,
 ):
     monkeypatch.setattr("core.project_scaffolder.BASE_DIR", tmp_path)
+    isolate_generated_manifests(tmp_path, monkeypatch)
 
     result = AutomationDesigner().create_project(PROMPT)
     project_path = Path(result.project_path)
     input_one = tmp_path / "fs10n.xlsx"
     input_two = tmp_path / "billing.xlsx"
-    frame = pd.DataFrame({"DOCUMENTO": ["1"], "VALOR": [10]})
+    frame = pd.DataFrame(
+        {"Conta": ["1000"], "Nº documento": ["1"], "VALOR": [10]}
+    )
     frame.to_excel(input_one, index=False)
     frame.to_excel(input_two, index=False)
 
@@ -210,13 +221,11 @@ def test_designer_publishes_manifest_and_registry_discovers_project(
     monkeypatch,
 ):
     monkeypatch.setattr("core.project_scaffolder.BASE_DIR", tmp_path)
-    monkeypatch.setattr("core.automation_designer.MANIFESTS_DIR", tmp_path / "manifests")
-    monkeypatch.setattr("core.manifest_loader.MANIFESTS_PATH", tmp_path / "manifests")
-    monkeypatch.setattr("core.registry.MANIFESTS_DIR", tmp_path / "manifests")
+    manifest_dir = isolate_generated_manifests(tmp_path, monkeypatch)
 
     result = AutomationDesigner().create_project(PROMPT)
     project_manifest = Path(result.manifest_path)
-    published_manifest = tmp_path / "manifests" / "conciliacao_fs10n_billing.yaml"
+    published_manifest = manifest_dir / "conciliacao_fs10n_billing.yaml"
 
     assert project_manifest == (
         tmp_path / "projects" / "conciliacao_fs10n_billing" / "manifest.yaml"
@@ -232,6 +241,7 @@ def test_designer_publishes_manifest_and_registry_discovers_project(
 
 def test_designer_selects_pattern_templates(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("core.project_scaffolder.BASE_DIR", tmp_path)
+    isolate_generated_manifests(tmp_path, monkeypatch)
     designer = AutomationDesigner()
 
     prompts_and_markers = {
@@ -250,6 +260,7 @@ def test_designer_selects_pattern_templates(tmp_path: Path, monkeypatch):
 
 def test_ai_endpoints_return_expected_contract(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("core.project_scaffolder.BASE_DIR", tmp_path)
+    isolate_generated_manifests(tmp_path, monkeypatch)
     request = AutomationRequest(prompt=PROMPT)
 
     analysis_response = AIAnalyzeResponse.model_validate(

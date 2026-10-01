@@ -11,8 +11,37 @@ from core.models import ExecutionResult
 from core.settings import BASE_DIR
 from core.template_engine import TemplateEngine
 
+# Importando a validação inteligente que criamos no passo anterior
+# from core.validators import validate_input_file, MVPInputError
+
 
 class Executor:
+
+    @staticmethod
+    def _parse_subprocess_error(stderr: str) -> str:
+        """
+        Traduz erros técnicos de bibliotecas (Pandas, etc) em mensagens 
+        amigáveis para o usuário do MVP.
+        """
+        stderr_lower = stderr.lower()
+        
+        # Erros comuns de leitura de CSV no Pandas
+        if "unicodedecodeerror" in stderr_lower:
+            return "Erro de codificação: O arquivo não está em UTF-8. Verifique o formato do arquivo (tente salvar como CSV UTF-8)."
+        if "parsererror" in stderr_lower or "error tokenizing data" in stderr_lower:
+            return "Erro de formatação: O arquivo CSV parece estar com o separador incorreto ou com quebras de linha fora do padrão."
+        if "keyerror" in stderr_lower or "ufunc 'isnan' not supported" in stderr_lower:
+            # Tenta extrair a coluna que faltou do erro do pandas
+            import re
+            match = re.search(r"KeyError:\s*['\"](.+?)['\"]", stderr)
+            col_name = match.group(1) if match else "desconhecida"
+            return f"Erro de Schema: A coluna obrigatória '{col_name}' não foi encontrada no arquivo."
+        if "filenotfounderror" in stderr_lower:
+            return "Erro: O sistema tentou ler um arquivo que não existe no servidor. O upload pode ter falhado."
+            
+        # Fallback: Se for um erro não mapeado, esconde o traceback do usuário
+        # mas mantém no log para o dev investigar.
+        return "Ocorreu um erro inesperado ao processar o arquivo. A equipe técnica foi notificada."
 
     @staticmethod
     def run(
@@ -32,12 +61,16 @@ class Executor:
         script_path = (
             project_path /
             manifest.entrypoint.script
-        )
+        ).resolve()
+        try:
+            script_path.relative_to(project_path)
+        except ValueError as error:
+            raise ValueError("O entrypoint precisa estar dentro da pasta do projeto.") from error
+        if not script_path.is_file():
+            raise FileNotFoundError(f"Entrypoint não encontrado: {script_path}")
 
-        if not script_path.exists() and not files:
-            raise FileNotFoundError(
-                f"Entrypoint não encontrado: {script_path}"
-            )
+        if manifest.required_files and not files:
+            raise ValueError("O projeto requer um arquivo de entrada, mas nenhum foi enviado.")
 
         log_execution_start(
             execution_id=None,
@@ -60,27 +93,28 @@ class Executor:
 
             file_path = files.get(required_file.id)
             if not file_path:
-                raise ValueError(
-                    f"Arquivo obrigatório não mapeado: {required_file.id}"
-                )
+                # Erro amigável
+                raise ValueError(f"Arquivo obrigatório não enviado: {required_file.id}")
 
             if not Path(file_path).exists():
+                # Erro amigável
                 raise FileNotFoundError(
-                    f"Arquivo de entrada não encontrado para {required_file.id}: {file_path}"
+                    f"Arquivo de entrada obrigatório '{required_file.id}' não encontrado: {file_path}"
                 )
+
+            # ==============================================
+            # AQUI ENTRA O FAIL-FAST (Validação antes de rodar)
+            # ==============================================
+            # if required_file.id == "clientes_csv": # Exemplo de validação específica
+            #     try:
+            #         validate_input_file(file_path, required_columns=["ID", "DATA", "VALOR"])
+            #     except MVPInputError as e:
+            #         raise ValueError(str(e)) from e # Transforma em erro de validação amigável
 
             args.extend([
                 cli_argument,
                 file_path,
             ])
-
-        # O manifesto é a fonte de verdade do entrypoint gerenciado.
-        pattern = getattr(manifest, "pattern", "generic")
-        script_path.parent.mkdir(parents=True, exist_ok=True)
-        script_path.write_text(
-            TemplateEngine.render_pattern_main(manifest, pattern),
-            encoding="utf-8",
-        )
 
         try:
             result = subprocess.run(
@@ -105,19 +139,20 @@ class Executor:
         duration_seconds = round((datetime.now() - started_at).total_seconds(), 2)
 
         if result.returncode != 0:
-            error_message = f"""
-STDOUT:
-{result.stdout}
+            # ==============================================
+            # A MÁGICA ACONTECE AQUI: Traduzir o STDERR
+            # ==============================================
+            raw_error = f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
+            
+            # Mensagem que o usuário vai ver (amigável)
+            user_friendly_error = Executor._parse_subprocess_error(result.stderr)
 
-STDERR:
-{result.stderr}
-"""
             log_execution_failure(
                 execution_id=None,
                 project_id=project_id,
                 duration=duration_seconds,
                 uploaded_files=list(files.keys()),
-                exception=error_message,
+                exception=raw_error, # Log mantém o traceback completo para o Dev
                 status="failed",
             )
             return ExecutionResult(
@@ -125,7 +160,7 @@ STDERR:
                 project_id=project_id,
                 status=ExecutionStatus.FAILED,
                 duration_seconds=duration_seconds,
-                error_message=error_message,
+                error_message=user_friendly_error, # Usuário vê a mensagem traduzida
             )
 
         log_execution_success(

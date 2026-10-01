@@ -110,3 +110,15 @@ class AICreateProjectRequest(BaseModel):
     prompt: str
     manifest_data: dict[str, Any] | None = None
     approved: bool = False
+
+class SharePointRequest(BaseModel):
+    sharepoint_id: int
+    title: str
+    request: str
+
+
+class SharePointResponse(BaseModel):
+    status: str
+    sharepoint_id: int
+    complexity: str | None = None
+    project_id: str | None = None

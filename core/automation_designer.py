@@ -57,7 +57,8 @@ class AutomationDesigner:
         manifest_data = dict(manifest_data)
         manifest_data.setdefault("pattern", pattern)
         manifest = ManifestGenerator.validate(manifest_data)
-        PipelineValidator.assert_valid(manifest.model_dump(mode="json"))
+        if manifest.steps:
+            PipelineValidator.assert_valid(manifest.model_dump(mode="json"))
         analysis = analysis or self._analysis_from_manifest(manifest)
         artifacts = ProjectScaffolder.create_automation_project(
             manifest,

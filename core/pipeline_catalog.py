@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-
 @dataclass(frozen=True)
 class OperationDefinition:
     operation: str
@@ -8,12 +7,13 @@ class OperationDefinition:
     aliases: tuple[str, ...]
     category: str = "transformation"
     required_parameters: tuple[str, ...] = ()
-
+    optional_parameters: tuple[str, ...] = ()
 
 SUPPORTED_OPERATIONS = (
     OperationDefinition(
         "filter", "Filtra registros conforme uma condição.",
-        ("filtrar", "somente", "apenas"), required_parameters=("condition",),
+        ("filtrar", "somente", "apenas"), 
+        required_parameters=("condition",),
     ),
     OperationDefinition(
         "calculate", "Cria ou calcula uma coluna.",
@@ -24,11 +24,19 @@ SUPPORTED_OPERATIONS = (
         "join", "Combina documentos por uma chave.",
         ("cruzar", "juntar", "unir", "relacionar"),
         required_parameters=("key",),
+        optional_parameters=("normalize_key", "key_type"),
     ),
     OperationDefinition(
         "reconcile", "Reconcilia documentos por uma chave.",
         ("conciliar", "confrontar", "identificar diferencas"),
         required_parameters=("key",),
+        optional_parameters=("normalize_key", "key_type"),
+    ),
+    OperationDefinition(
+        "normalize_key", "Normaliza coluna chave para merge.",
+        ("normalizar chave", "padronizar chave", "formatar chave"),
+        required_parameters=("key",),
+        optional_parameters=("key_type",),
     ),
     OperationDefinition(
         "aggregate", "Agrupa e resume registros.",

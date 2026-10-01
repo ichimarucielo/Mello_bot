@@ -2,7 +2,7 @@ import json
 import sqlite3
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 
 ExecutionPayload = dict[str, Any]
@@ -119,6 +119,20 @@ class SQLiteExecutionRepository(ExecutionRepository):
                     output_name TEXT NOT NULL,
                     FOREIGN KEY (execution_id) REFERENCES executions(execution_id)
                         ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS automation_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sharepoint_id INTEGER,
+                    title TEXT NOT NULL,
+                    request TEXT NOT NULL,
+                    complexity TEXT,
+                    suggested_project_id TEXT,
+                    status TEXT DEFAULT 'novo',
+                    execution_id TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    processed_at DATETIME,
+                    error_message TEXT
                 );
                 """
             )
@@ -243,6 +257,51 @@ class SQLiteExecutionRepository(ExecutionRepository):
                     ).fetchall()
                 ]
             return payload
+
+    def save_automation_request(
+        self,
+        sharepoint_id: int,
+        title: str,
+        request: str,
+        complexity: str | None,
+        suggested_project_id: str | None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO automation_requests (
+                    sharepoint_id, title, request, complexity, suggested_project_id
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    sharepoint_id,
+                    title,
+                    request,
+                    complexity,
+                    suggested_project_id,
+                ),
+            )
+
+    def list_automation_requests(self):
+
+        print("DATABASE =", self.database_path)
+
+        with self._connect() as connection:
+
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM automation_requests
+                """
+            ).fetchall()
+
+            print("ROWS =", len(rows))
+
+            for row in rows:
+                print(dict(row))
+
+        return [dict(row) for row in rows]
 
     def migrate_json_logs(self, folder: Path) -> int:
         folder = Path(folder)

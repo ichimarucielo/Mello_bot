@@ -305,14 +305,61 @@ class DocumentResolver:
                     keys.append(key)
 
         key_match = re.search(
-            r"(?:por|pelo|pela|usando|chave(?: principal)?(?: de)?)[\s:]+"
-            r"([\wà-ú][\wà-ú ]*)",
+            r"(?:usando\s+|(?:por|pelo|pela)\s+(?:chave(?: principal)?(?: de)?\s+)?|"
+            r"chaves?(?: principal)?(?: de)?\s+)"
+            r"([\wà-ú][\wà-ú ,]+?)"
+            r"(?=\s+e\s+(?:gerar|criar|produzir|exportar|identificar|entregar|validar|remover)\b|[.;]|$)",
             prompt.casefold(),
         )
         if key_match:
-            candidate = key_match.group(1).strip(" .,:;")
-            if candidate and candidate not in keys:
-                keys.append(candidate)
+            phrase = re.sub(
+                r"^chave(?:s)?(?: principal)?(?: de)?\s+",
+                "",
+                key_match.group(1).strip(" .,:;"),
+            )
+            operation_prefixes = (
+                "remover",
+                "remova",
+                "validar",
+                "valide",
+                "exportar",
+                "exporte",
+                "gerar",
+                "gere",
+                "criar",
+                "calcular",
+                "agrupar",
+                "filtrar",
+                "ordenar",
+                "deduplicar",
+            )
+
+            def is_operation_clause(value: str) -> bool:
+                normalized = value.casefold().strip()
+                return any(
+                    normalized.startswith(f"{prefix} ") or normalized == prefix
+                    for prefix in operation_prefixes
+                )
+
+            explicit_keys = [
+                key
+                for key in keys
+                if key.casefold() in phrase.casefold()
+                and not is_operation_clause(key)
+            ]
+            if explicit_keys:
+                return sorted(
+                    dict.fromkeys(explicit_keys),
+                    key=lambda key: phrase.casefold().find(key.casefold()),
+                )
+            explicit_keys = []
+            for item in re.split(r"\s*(?:,|\be\b)\s*", phrase):
+                candidate = item.strip(" .,:;")
+                if is_operation_clause(candidate):
+                    break
+                if candidate:
+                    explicit_keys.append(candidate)
+            return explicit_keys
         return keys
 
     def infer_operations(self, prompt: str) -> list[dict[str, Any]]:

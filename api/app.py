@@ -14,6 +14,8 @@ from api.schemas import (
     OutputResponse,
     ProjectResponse,
     RunResponse,
+    SharePointRequest,
+    SharePointResponse,
 )
 from core.executor import Executor
 from core.orchestrator import Orchestrator
@@ -26,6 +28,7 @@ from core.health_service import HealthService
 from core.exceptions import ProjectNotFoundError
 from core.execution_service import ExecutionService, StagedUpload
 from core.automation_designer import AutomationDesigner
+from core.automation_request_service import AutomationRequestService
 from core.models import AutomationRequest
 from core.manifest_generator import ManifestGenerator
 
@@ -373,6 +376,32 @@ def get_execution(
     raise HTTPException(
         status_code=404,
         detail="Execução não encontrada",
+    )
+
+@app.post(
+    "/sharepoint/request",
+    response_model=SharePointResponse,
+    status_code=202,
+)
+async def process_sharepoint_request(
+    payload: SharePointRequest,
+):
+    analysis = AutomationDesigner().analyze(
+        payload.request
+    )
+    AutomationRequestService.create(
+        sharepoint_id=payload.sharepoint_id,
+        title=payload.title,
+        request=payload.request,
+        complexity=analysis.complexity,
+        suggested_project_id=analysis.project_id,
+    )
+
+    return SharePointResponse(
+        status="received",
+        sharepoint_id=payload.sharepoint_id,
+        complexity=analysis.complexity,
+        project_id=analysis.project_id,
     )
 
 @app.post(

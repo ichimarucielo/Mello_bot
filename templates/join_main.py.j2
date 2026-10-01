@@ -1,0 +1,100 @@
+import pandas as pd
+import logging
+from pathlib import Path
+import argparse
+from core.utils import safe_merge, detect_key_type, validate_key_format
+
+logger = logging.getLogger(__name__)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Script de junção de dados")
+    parser.add_argument("--left", required=True, help="Arquivo da base esquerda")
+    parser.add_argument("--right", required=True, help="Arquivo da base direita")
+    parser.add_argument("--output", required=True, help="Arquivo de saída")
+    parser.add_argument("--key", required=True, help="Chave de junção")
+    parser.add_argument("--how", default="inner", choices=["inner", "left", "right", "outer"],
+                       help="Tipo de junção (padrão: inner)")
+    return parser.parse_args()
+
+def load_data(file_path: Path) -> pd.DataFrame:
+    """Carrega dados do arquivo suportando CSV e XLSX"""
+    if file_path.suffix.lower() == '.csv':
+        return pd.read_csv(file_path, sep=';')
+    elif file_path.suffix.lower() in ['.xlsx', '.xls']:
+        return pd.read_excel(file_path)
+    else:
+        raise ValueError(f"Formato não suportado: {file_path.suffix}")
+
+def validate_inputs(left_df: pd.DataFrame, right_df: pd.DataFrame, key: str) -> None:
+    """Valida se as chaves existem e estão no formato correto"""
+    if key not in left_df.columns:
+        raise ValueError(f"Chave '{key}' não encontrada na base esquerda")
+    if key not in right_df.columns:
+        raise ValueError(f"Chave '{key}' não encontrada na base direita")
+    
+    # Detecta e valida tipo da chave
+    key_type = detect_key_type(key)
+    if key_type:
+        invalid_left = left_df[~left_df[key].apply(lambda x: validate_key_format(str(x), key_type))]
+        invalid_right = right_df[~right_df[key].apply(lambda x: validate_key_format(str(x), key_type))]
+        
+        if not invalid_left.empty:
+            logger.warning(f"Base esquerda tem {len(invalid_left)} registros com chave '{key}' inválida")
+        if not invalid_right.empty:
+            logger.warning(f"Base direita tem {len(invalid_right)} registros com chave '{key}' inválida")
+
+def execute_join(
+    left_df: pd.DataFrame,
+    right_df: pd.DataFrame,
+    key: str,
+    how: str = "inner"
+) -> pd.DataFrame:
+    """Executa a junção entre as duas bases"""
+    # Detecta tipo da chave
+    key_type = detect_key_type(key)
+    
+    # Prepara bases para merge
+    logger.info(f"Preparando bases para junção com chave '{key}' ({key_type or 'genérica'})")
+    result = safe_merge(
+        left_df,
+        right_df,
+        on=key,
+        how=how,
+        key_types={key: key_type} if key_type else None
+    )
+    
+    logger.info(f"Junção '{how}' concluída com {len(result)} registros")
+    return result
+
+def main():
+    args = parse_args()
+    
+    try:
+        # Carrega dados
+        logger.info(f"Carregando bases: {args.left} e {args.right}")
+        left_df = load_data(Path(args.left))
+        right_df = load_data(Path(args.right))
+        
+        # Valida inputs
+        validate_inputs(left_df, right_df, args.key)
+        
+        # Executa join
+        result = execute_join(left_df, right_df, args.key, args.how)
+        
+        # Salva resultado
+        output_path = Path(args.output)
+        logger.info(f"Salvando resultado em: {output_path}")
+        
+        if output_path.suffix.lower() == '.csv':
+            result.to_csv(output_path, index=False, sep=';')
+        else:
+            result.to_excel(output_path, index=False)
+            
+        logger.info("Junção concluída com sucesso!")
+        
+    except Exception as e:
+        logger.error(f"Erro na junção: {str(e)}")
+        raise
+
+if __name__ == "__main__":
+    main()

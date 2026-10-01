@@ -1,39 +1,149 @@
-import argparse
+import pandas as pd
 import logging
 from pathlib import Path
+import argparse
+from typing import List, Dict, Any
 
-import pandas as pd
-
-
+logger = logging.getLogger(__name__)
 REQUIRED_FILES = {{ REQUIRED_FILES }}
 OUTPUTS = {{ OUTPUTS }}
-PIPELINE_STEPS = {{ STEPS }}
 OUTPUT_FOLDER = {{ OUTPUT_FOLDER }}
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+PROJECT_NAME = {{ PROJECT_NAME }}
 
 
-def read_input(file_path: str) -> pd.DataFrame:
-    path = Path(file_path)
-    if path.suffix.lower() == ".csv":
-        return pd.read_csv(path, sep=";")
-    return pd.read_excel(path)
+def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    result = df.copy()
+    result.columns = [
+        str(column).strip().lower().replace(" ", "_").replace("-", "_")
+        for column in result.columns
+    ]
+    return result
 
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description={{ PROJECT_NAME }})
+def parse_args():
+    parser = argparse.ArgumentParser(description=PROJECT_NAME)
     for required_file in REQUIRED_FILES:
         parser.add_argument(required_file["cli_argument"], required=True)
-    args = parser.parse_args()
-    data = read_input(getattr(args, REQUIRED_FILES[0]["argument_name"]))
+    parser.add_argument("--sheet_name", default="Dados", 
+                       help="Nome da aba principal (padrão: Dados)")
+    parser.add_argument("--metadata", help="Arquivo com metadados (JSON)")
+    parser.add_argument("--date_columns", nargs='+',
+                       help="Colunas de data para formatação")
+    return parser.parse_args()
 
-    # TODO: aplicar limpeza, tipagem e regras do dataset.
-    output_folder = Path(OUTPUT_FOLDER)
-    output_folder.mkdir(parents=True, exist_ok=True)
-    for output_name in OUTPUTS:
-        data.to_csv(output_folder / output_name, index=False)
-    logger.info("Dataset Power BI exportado: %s", {{ PROJECT_ID }})
+def load_data(file_path: Path) -> pd.DataFrame:
+    """Carrega dados do arquivo suportando CSV e XLSX"""
+    if file_path.suffix.lower() == '.csv':
+        df = pd.read_csv(file_path, sep=';')
+    elif file_path.suffix.lower() in ['.xlsx', '.xls']:
+        df = pd.read_excel(file_path)
+    else:
+        raise ValueError(f"Formato não suportado: {file_path.suffix}")
+    
+    # Padroniza nomes de colunas
+    return standardize_column_names(df)
 
+def validate_inputs(dfs: List[pd.DataFrame]) -> None:
+    """Valida os dataframes de entrada"""
+    for i, df in enumerate(dfs):
+        if df.empty:
+            logger.warning(f"Arquivo {i+1} está vazio")
+
+def format_dates(df: pd.DataFrame, date_columns: List[str]) -> pd.DataFrame:
+    """Formata colunas de data"""
+    df = df.copy()
+    for col in date_columns:
+        if col in df.columns:
+            logger.info(f"Formatando coluna de data: {col}")
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    return df
+
+def prepare_metadata(metadata_file: Path) -> Dict[str, Any]:
+    """Carrega metadados do arquivo JSON"""
+    if metadata_file:
+        import json
+        with open(metadata_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def create_workbook(
+    dfs: List[pd.DataFrame],
+    output_path: Path,
+    sheet_name: str,
+    metadata: Dict[str, Any],
+    date_columns: List[str]
+) -> None:
+    """Cria arquivo Excel com múltiplas abas"""
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        # Adiciona aba principal
+        main_df = format_dates(pd.concat(dfs, ignore_index=True), date_columns)
+        main_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        
+        # Adiciona abas de metadados se existirem
+        if metadata:
+            # Aba de descrição
+            if 'description' in metadata:
+                pd.DataFrame([{'description': metadata['description']}]).to_excel(
+                    writer, sheet_name='Descrição', index=False
+                )
+            
+            # Aba de dicionário de dados
+            if 'columns' in metadata:
+                pd.DataFrame(metadata['columns']).to_excel(
+                    writer, sheet_name='Dicionário', index=False
+                )
+        
+        # Formata as abas
+        workbook = writer.book
+        for sheet in workbook.worksheets:
+            # Auto-size columns
+            for column in sheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                sheet.column_dimensions[column_letter].width = adjusted_width
+
+def main():
+    args = parse_args()
+    
+    try:
+        metadata = prepare_metadata(Path(args.metadata) if args.metadata else None)
+        input_paths = [
+            getattr(args, item["argument_name"])
+            for item in REQUIRED_FILES
+        ]
+        logger.info("Carregando %s arquivos de entrada", len(input_paths))
+        dfs = [load_data(Path(file_path)) for file_path in input_paths]
+        validate_inputs(dfs)
+
+        output_folder = Path(OUTPUT_FOLDER)
+        output_folder.mkdir(parents=True, exist_ok=True)
+        for output_name in OUTPUTS:
+            output_path = output_folder / output_name
+            if output_path.suffix.lower() == ".csv":
+                result = format_dates(
+                    pd.concat(dfs, ignore_index=True),
+                    args.date_columns or [],
+                )
+                result.to_csv(output_path, index=False, sep=";")
+            else:
+                create_workbook(
+                    dfs=dfs,
+                    output_path=output_path,
+                    sheet_name=args.sheet_name,
+                    metadata=metadata,
+                    date_columns=args.date_columns or [],
+                )
+            logger.info("Dataset salvo em: %s", output_path)
+        
+    except Exception as e:
+        logger.error(f"Erro na preparação do dataset: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()

@@ -19,8 +19,10 @@ import streamlit.components.v1 as components
 
 from core.history_service import HistoryService
 from core.logger import log_automation_event
+from core.models import OperationStep
 from core.orchestrator import Orchestrator
 from core.pipeline_validator import PipelineValidator
+from core.automation_request_service import AutomationRequestService
 
 # =============================================================================
 # LOGGING
@@ -98,6 +100,14 @@ def load_history() -> list[dict]:
         return HistoryService.get_history(limit=100)
     except Exception:
         logger.exception("Erro carregando histórico")
+        return []
+
+
+def load_automation_requests() -> list[dict]:
+    try:
+        return AutomationRequestService.list()
+    except Exception:
+        logger.exception("Erro carregando solicitações")
         return []
 
 
@@ -227,6 +237,8 @@ def render_home_page(history: list[dict], projects: dict) -> None:
         render_metric_card("Taxa de sucesso", success_rate, "Execuções concluídas")
     with metric_columns[3]:
         render_metric_card("Outputs entregues", str(sum(len(item.get("outputs", [])) for item in history)), "Artefatos gerados")
+
+    render_execution_status(history)
 
     st.space("large")
     st.markdown('<div class="section-kicker">Como funciona</div>', unsafe_allow_html=True)
@@ -406,6 +418,39 @@ def render_mello_ai_page() -> None:
         if execution_plan:
             st.subheader("Execution Plan")
             st.caption(execution_plan.get("summary", "Plano de execução sugerido."))
+            detected_pattern = execution_plan.get(
+                "pattern",
+                analysis.get("pattern", "generic"),
+            )
+            st.write(f"**Padrão detectado:** `{detected_pattern}`")
+            pattern_reason = execution_plan.get("pattern_reason")
+            if pattern_reason:
+                st.caption(f"Motivo: {pattern_reason}")
+            try:
+                reviewed_manifest = Orchestrator.validate_manifest(manifest_data)
+                manifest_yaml = Orchestrator.manifest_to_yaml(reviewed_manifest)
+                manifest_error = None
+            except Exception as error:
+                manifest_yaml = ""
+                manifest_error = str(error)
+            export_plan_col, export_manifest_col = st.columns(2)
+            export_plan_col.download_button(
+                "Baixar Execution Plan (JSON)",
+                data=json.dumps(execution_plan, ensure_ascii=False, indent=2),
+                file_name=f"{analysis.get('project_id', 'mello')}_execution_plan.json",
+                mime="application/json",
+                key=f"execution_plan_download_{analysis.get('project_id', 'mello')}",
+            )
+            export_manifest_col.download_button(
+                "Baixar Manifesto (YAML)",
+                data=manifest_yaml,
+                file_name=f"{analysis.get('project_id', 'mello')}_manifest.yaml",
+                mime="application/yaml",
+                disabled=manifest_error is not None,
+                key=f"execution_manifest_download_{analysis.get('project_id', 'mello')}",
+            )
+            if manifest_error:
+                st.caption(f"Manifesto ainda não exportável: {manifest_error}")
             intent_col, confidence_col, source_col = st.columns(3)
             intent_col.metric(
                 "Intenção",
@@ -439,6 +484,12 @@ def render_mello_ai_page() -> None:
                 st.write("**Transformações**")
                 decisions = execution_plan.get("decisions", [])
                 transformations = decisions or execution_plan.get("transformations", [])
+                source_labels = {
+                    "prompt": "PROMPT",
+                    "regra_da_plataforma": "PLATFORM",
+                    "perfil": "PROFILE",
+                    "confirmacao_humana": "HUMAN CONFIRMATION",
+                }
                 quality_rules = [
                     transformation
                     for transformation in transformations
@@ -452,15 +503,19 @@ def render_mello_ai_page() -> None:
                         transformation.get("details", {}),
                     )
                     suffix = f" — {parameters}" if parameters else ""
+                    sources = transformation.get("source", [])
+                    origin = " + ".join(
+                        source_labels.get(source, str(source).upper())
+                        for source in sources
+                    ) or "PENDING"
                     st.write(
-                        f"{transformation.get('order', '')} "
+                        f"`[{origin}]` "
                         f"{transformation.get('description', transformation.get('label', transformation.get('operation', '-')))}"
                         f"{suffix}"
                     )
                     st.caption(
                         f"Motivo: {transformation.get('reason', 'operação prevista no plano')} · "
-                        f"Confiança: {transformation.get('confidence', 'baixa')} · "
-                        f"Origem: {', '.join(transformation.get('source', [])) or 'nenhuma'}"
+                        f"Confiança: {transformation.get('confidence', 'baixa')}"
                     )
                     pending = transformation.get("pending_confirmation", [])
                     if pending:
@@ -476,6 +531,111 @@ def render_mello_ai_page() -> None:
                             )
                         else:
                             st.write("- Validar a qualidade dos dados")
+            suggestions = execution_plan.get("suggestions", [])
+            if suggestions:
+                st.write("**Sugestões**")
+                for suggestion_index, suggestion in enumerate(suggestions):
+                    with st.container(border=True):
+                        st.warning(
+                            suggestion.get(
+                                "message",
+                                "O MELLO identificou uma possível operação opcional.",
+                            )
+                        )
+                        st.caption(suggestion.get("reason", "Confirme antes de adicionar."))
+                        parameters = suggestion.get("parameters", {})
+                        candidate_columns = suggestion.get("candidate_columns", [])
+                        candidate = parameters.get("group_by")
+                        widget_key = (
+                            f"mello_ai_group_suggestion_"
+                            f"{analysis.get('project_id', 'project')}_{suggestion_index}"
+                        )
+                        if candidate_columns:
+                            options = [""] + candidate_columns
+                            selected_index = (
+                                options.index(candidate)
+                                if candidate in options
+                                else 0
+                            )
+                            selected_column = st.selectbox(
+                                "Coluna para agrupamento",
+                                options,
+                                index=selected_index,
+                                format_func=lambda value: value or "Escolha uma coluna",
+                                key=f"{widget_key}_column",
+                            )
+                        else:
+                            selected_column = st.text_input(
+                                "Coluna para agrupamento",
+                                placeholder="Ex.: cliente",
+                                key=f"{widget_key}_column",
+                            ).strip()
+
+                        if st.button(
+                            "Confirmar e adicionar agrupamento",
+                            disabled=not selected_column,
+                            key=f"{widget_key}_confirm",
+                        ):
+                            steps = list(
+                                manifest_data.get("steps")
+                                or analysis.get("steps", [])
+                            )
+                            steps.append(
+                                {
+                                    "type": "aggregate",
+                                    "description": "Agrupamento confirmado pelo usuário.",
+                                    "group_by": selected_column,
+                                    "confidence": "alta",
+                                    "pending_confirmation": [],
+                                }
+                            )
+                            canonical_steps = [
+                                OperationStep.model_validate(step).model_dump(
+                                    mode="json"
+                                )
+                                for step in steps
+                            ]
+                            manifest_data["steps"] = steps
+                            manifest_data["pipeline"] = {
+                                "operations": canonical_steps
+                            }
+                            analysis["steps"] = canonical_steps
+                            analysis["manifest_data"] = manifest_data
+                            understanding = dict(analysis.get("understanding", {}))
+                            understanding["operations"] = [
+                                OperationStep.model_validate(step).operation
+                                for step in steps
+                            ]
+                            understanding["operation_count"] = len(steps)
+                            analysis["understanding"] = understanding
+                            execution_plan["suggestions"] = [
+                                item
+                                for index, item in enumerate(suggestions)
+                                if index != suggestion_index
+                            ]
+                            decisions = list(execution_plan.get("decisions", []))
+                            decisions.append(
+                                {
+                                    "operation": "aggregate",
+                                    "parameters": {"group_by": selected_column},
+                                    "confidence": "alta",
+                                    "source": ["confirmacao_humana"],
+                                    "reason": "Adicionado após confirmação humana.",
+                                    "pending_confirmation": [],
+                                }
+                            )
+                            execution_plan["decisions"] = decisions
+                            execution_plan["summary"] = (
+                                f"{analysis.get('project_name', 'Projeto')}: "
+                                f"{len(execution_plan.get('documents', []))} documento(s), "
+                                f"{len(steps)} transformação(ões) e "
+                                f"{len(analysis.get('outputs', []))} output(s)."
+                            )
+                            analysis["execution_plan"] = execution_plan
+                            st.session_state["mello_ai_analysis"] = analysis
+                            st.session_state["mello_ai_manifest_data"] = manifest_data
+                            st.session_state["mello_ai_approved"] = False
+                            st.rerun()
             pending_questions = execution_plan.get("open_questions", [])
             if pending_questions:
                 st.warning("**Pendências**\n\n" + "\n".join(f"- {item}" for item in pending_questions))
@@ -659,7 +819,6 @@ def render_mello_ai_page() -> None:
                 input_errors.append("Os IDs dos inputs precisam ser únicos.")
             manifest_data["required_files"] = updated_inputs
         with output_col:
-            st.write("**Outputs editáveis**")
             output_mode = st.radio(
                 "Formato de entrega",
                 options=["separate", "workbook"],
@@ -677,29 +836,34 @@ def render_mello_ai_page() -> None:
                 horizontal=True,
             )
             manifest_data["output_mode"] = output_mode
-            edited_outputs = st.data_editor(
-                [{"output": output} for output in manifest_data.get(
-                    "outputs", analysis.get("outputs", [])
-                )],
-                num_rows="dynamic",
-                width="stretch",
-                hide_index=True,
-                key="mello_ai_outputs_editor",
-            )
-            output_rows = (
-                edited_outputs.to_dict(orient="records")
-                if hasattr(edited_outputs, "to_dict")
-                else edited_outputs
-            )
-            selected_outputs = [
-                row["output"]
-                for row in output_rows
-                if row.get("output")
-            ]
-            if output_mode == "workbook":
-                manifest_data["workbook_sheets"] = selected_outputs
-            manifest_data["outputs"] = selected_outputs
-            if output_mode == "workbook":
+            if output_mode == "separate":
+                st.write("**Arquivos de saída editáveis**")
+                edited_outputs = st.data_editor(
+                    [
+                        {"output": output}
+                        for output in manifest_data.get(
+                            "outputs", analysis.get("outputs", [])
+                        )
+                    ],
+                    num_rows="dynamic",
+                    width="stretch",
+                    hide_index=True,
+                    key="mello_ai_outputs_editor",
+                )
+                output_rows = (
+                    edited_outputs.to_dict(orient="records")
+                    if hasattr(edited_outputs, "to_dict")
+                    else edited_outputs
+                )
+                manifest_data["outputs"] = [
+                    row["output"].strip()
+                    for row in output_rows
+                    if row.get("output") and row["output"].strip()
+                ]
+                manifest_data.pop("workbook_sheets", None)
+                manifest_data.pop("workbook_name", None)
+            else:
+                st.write("**Workbook e abas**")
                 workbook_name = st.text_input(
                     "Nome do workbook",
                     value=manifest_data.get(
@@ -708,8 +872,58 @@ def render_mello_ai_page() -> None:
                     ),
                     key="mello_ai_workbook_name",
                 )
-                manifest_data["workbook_name"] = workbook_name
-                manifest_data["outputs"] = [workbook_name]
+                manifest_data["workbook_name"] = (workbook_name or "").strip()
+                st.write("**Nomes das abas**")
+                st.caption(
+                    "Renomeie, remova ou adicione abas. Cada nome deve ser único e ter até 31 caracteres."
+                )
+                sheet_rows = st.data_editor(
+                    [
+                        {"aba": sheet}
+                        for sheet in (
+                            manifest_data.get("workbook_sheets")
+                            or analysis.get("outputs", [])
+                        )
+                    ],
+                    num_rows="dynamic",
+                    width="stretch",
+                    hide_index=True,
+                    key="mello_ai_workbook_sheets_editor",
+                )
+                if isinstance(sheet_rows, list):
+                    sheet_records = sheet_rows
+                else:
+                    sheet_records = sheet_rows.to_dict(orient="records")
+                workbook_sheets = [
+                    row["aba"].strip()
+                    for row in sheet_records
+                    if row.get("aba") and row["aba"].strip()
+                ]
+                invalid_sheet_names = [
+                    name
+                    for name in workbook_sheets
+                    if len(name) > 31 or re.search(r"[\\/*?:\[\]]", name)
+                ]
+                duplicate_sheet_names = len(
+                    {name.casefold() for name in workbook_sheets}
+                ) != len(workbook_sheets)
+                if invalid_sheet_names:
+                    input_errors.append(
+                        "Nomes de abas devem ter até 31 caracteres e não podem "
+                        "conter \\, /, ?, *, :, [ ou ]."
+                    )
+                if duplicate_sheet_names:
+                    input_errors.append("Os nomes das abas precisam ser únicos.")
+                if not workbook_sheets:
+                    input_errors.append("O workbook precisa ter pelo menos uma aba.")
+                if not manifest_data["workbook_name"]:
+                    input_errors.append("Informe o nome do arquivo workbook.")
+                manifest_data["workbook_sheets"] = workbook_sheets
+                manifest_data["outputs"] = (
+                    [manifest_data["workbook_name"]]
+                    if manifest_data["workbook_name"]
+                    else []
+                )
         pipeline_validation = PipelineValidator.validate(manifest_data)
         if input_errors:
             pipeline_validation = {
@@ -799,41 +1013,40 @@ def render_mello_ai_page() -> None:
             st.code(main_content, language="python")
 
 
-def render_dashboard(history: list[dict], project_count: int) -> None:
-    successful_runs = sum(
-        execution.get("status") == "success"
+def render_execution_status(history: list[dict]) -> None:
+    successful = sum(execution.get("status") == "success" for execution in history)
+    failed = [
+        execution
         for execution in history
-    )
-    success_rate = (
-        round(successful_runs / len(history) * 100)
-        if history
-        else 0
-    )
-    failures = sum(
-        execution.get("status") in {"failed", "error"}
-        for execution in history
-    )
-    generated_outputs = sum(
-        len(execution.get("outputs", []))
-        for execution in history
-    )
-    latest_duration = (
-        history[0].get(
-            "duration_seconds",
-            "-",
-        )
-        if history
-        else "-"
-    )
+        if execution.get("status") in {"failed", "error"}
+    ]
+    running = sum(execution.get("status") == "running" for execution in history)
 
-    col_projects, col_runs, col_success = st.columns(3)
-    col_failures, col_outputs, col_duration = st.columns(3)
-    col_projects.metric("Projetos", project_count)
-    col_runs.metric("Execuções", len(history))
-    col_success.metric("Sucesso", f"{success_rate}%")
-    col_failures.metric("Falhas", failures)
-    col_outputs.metric("Outputs gerados", generated_outputs)
-    col_duration.metric("Última execução", f"{latest_duration}s")
+    st.subheader("Execuções")
+    st.caption("Contagens das últimas 100 execuções registradas.")
+    status_columns = st.columns(3)
+    status_columns[0].metric("Sucesso", successful)
+    status_columns[1].metric("Falha", len(failed))
+    status_columns[2].metric("Em andamento", running)
+
+    if failed:
+        latest_failure = max(
+            failed,
+            key=lambda execution: str(
+                execution.get("finished_at")
+                or execution.get("started_at")
+                or execution.get("end_time")
+                or ""
+            ),
+        )
+        st.warning(
+            f"Última falha: {latest_failure.get('project_id', '-')} · "
+            f"{format_execution_date(latest_failure)}"
+        )
+        if latest_failure.get("error_message"):
+            st.caption(latest_failure["error_message"])
+    else:
+        st.caption("Nenhuma falha registrada no histórico.")
 
 
 def format_execution_status(status: str) -> str:
@@ -921,6 +1134,54 @@ def render_history_page(history: list[dict]) -> None:
             st.write(f"- {output}")
     else:
         st.caption("Nenhum output registrado.")
+
+
+def format_request_date(created_at: str | None) -> str:
+    if not created_at:
+        return "-"
+
+    try:
+        return datetime.fromisoformat(created_at).strftime("%d/%m/%Y %H:%M")
+    except (TypeError, ValueError):
+        return str(created_at)
+
+
+def render_requests_page(requests: list[dict]) -> None:
+    st.header("Solicitações")
+    st.caption("Solicitações recebidas pelo SharePoint e registradas no MELLO BOT.")
+
+    if not requests:
+        st.info("Nenhuma solicitação encontrada.")
+        return
+
+    rows = [
+        {
+            "ID": request["id"],
+            "Solicitante": request["title"],
+            "Pedido": request["request"],
+            "Projeto sugerido": request["suggested_project_id"] or "-",
+            "Status": request["status"] or "-",
+            "Data": format_request_date(request["created_at"]),
+        }
+        for request in requests
+    ]
+    st.caption(f"Mostrando {len(rows)} solicitação(ões).")
+    st.dataframe(
+        rows,
+        hide_index=True,
+        height=min(600, max(180, 38 * (len(rows) + 1))),
+        column_config={
+            "ID": st.column_config.NumberColumn("ID", width="small"),
+            "Solicitante": st.column_config.TextColumn("Solicitante", width="medium"),
+            "Pedido": st.column_config.TextColumn("Pedido", width="large"),
+            "Projeto sugerido": st.column_config.TextColumn(
+                "Projeto sugerido",
+                width="medium",
+            ),
+            "Status": st.column_config.TextColumn("Status", width="small"),
+            "Data": st.column_config.TextColumn("Data", width="medium"),
+        },
+    )
 
 
 def render_projects_page(projects: dict) -> None:
@@ -1074,22 +1335,25 @@ def render_health_page() -> None:
     st.header("Diagnóstico")
     diagnosis = Orchestrator.diagnose()
     metrics = st.columns(5)
-    metrics[0].metric("Manifestos válidos", diagnosis["valid_manifests"])
-    metrics[1].metric("Projetos encontrados", diagnosis["projects_found"])
-    metrics[2].metric("Caminhos válidos", diagnosis["valid_paths"])
-    metrics[3].metric("Entrypoints encontrados", diagnosis["entrypoints_found"])
-    metrics[4].metric("Outputs acessíveis", diagnosis["accessible_outputs"])
+    metrics[0].metric("Manifestos", diagnosis["manifest_count"])
+    metrics[1].metric("YAMLs válidos", diagnosis["valid_manifests"])
+    metrics[2].metric("Projetos saudáveis", diagnosis["healthy_projects"])
+    metrics[3].metric("Precisam de atenção", diagnosis["unhealthy_projects"])
+    metrics[4].metric("Outputs já gerados", diagnosis["accessible_outputs"])
 
     for item in diagnosis["details"]:
         if item["error"]:
             st.error(f"✗ {item['id']}: {item['error']}")
         else:
+            icon = "✓" if item["healthy"] else "⚠"
             st.write(
-                f"{'✓' if item['valid'] else '✗'} **{item['id']}** · "
+                f"{icon} **{item['id']}** · YAML {'✓' if item['valid'] else '✗'} · "
                 f"caminho {'✓' if item['project_path'] else '✗'} · "
                 f"entrypoint {'✓' if item['entrypoint'] else '✗'} · "
-                f"outputs {'✓' if item['outputs'] else '✗'}"
+                f"outputs configurados {'✓' if item['outputs_configured'] else '✗'}"
             )
+            if item["outputs_configured"] and not item["outputs"]:
+                st.caption("Outputs declarados, mas ainda não gerados.")
 
 
 def render_create_project_page() -> None:
@@ -1252,6 +1516,7 @@ with st.sidebar:
             "Projetos",
             "Execuções",
             "Histórico",
+            "Solicitações",
             "Outputs",
             "Administração",
             "Diagnóstico",
@@ -1282,6 +1547,10 @@ if navigation == "Visão geral":
 
 if navigation == "Histórico":
     render_history_page(history)
+    st.stop()
+
+if navigation == "Solicitações":
+    render_requests_page(load_automation_requests())
     st.stop()
 
 if navigation == "Projetos":

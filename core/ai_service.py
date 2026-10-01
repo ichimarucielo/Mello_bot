@@ -104,6 +104,16 @@ class MockAIService(AIService):
             steps,
             profile_metadata,
         )
+        requested_workbook_sheets = self._requested_workbook_sheets(
+            normalized_prompt
+        )
+        if requested_workbook_sheets:
+            outputs = requested_workbook_sheets
+        workbook_requested = bool(requested_workbook_sheets) or (
+            "workbook" in prompt_lower
+            or "unico" in prompt_lower
+            and ("excel" in prompt_lower or "arquivo" in prompt_lower)
+        )
         description = normalized_prompt.rstrip(".") + "."
         understanding = self._understanding(inputs, steps, outputs, project_name)
         execution_plan = self._execution_plan(
@@ -114,11 +124,14 @@ class MockAIService(AIService):
         )
         resolved_profiles = self.RESOLVER.resolve_profiles(prompt_lower)
         resolver_keys = self.RESOLVER.infer_keys(prompt_lower, inputs)
-        workbook_requested = "workbook" in prompt_lower or (
-            "unico" in prompt_lower and ("excel" in prompt_lower or "arquivo" in prompt_lower)
-        )
         execution_plan = execution_plan.model_copy(
             update={
+                "pattern": pattern,
+                "pattern_reason": self._pattern_reason(
+                    pattern,
+                    intent,
+                    profile_metadata,
+                ),
                 "intent": self._intent_label(intent),
                 "intent_confidence": "alta" if intent.get("explicit") else "baixa",
                 "intent_source": ["prompt"] if intent.get("explicit") else [],
@@ -129,6 +142,11 @@ class MockAIService(AIService):
                 ),
                 "decisions": self._plan_decisions(
                     steps, prompt_lower, resolver_keys, profile_metadata
+                ),
+                "suggestions": self._plan_suggestions(
+                    prompt_lower,
+                    steps,
+                    profile_metadata,
                 ),
                 "profiles": [
                     {
@@ -184,9 +202,11 @@ class MockAIService(AIService):
             }
             for item in inputs
         ]
-        if workbook_requested and len(outputs) > 1:
+        if workbook_requested and (requested_workbook_sheets or len(outputs) > 1):
             manifest_data["output_mode"] = "workbook"
-            manifest_data["workbook_sheets"] = list(outputs)
+            manifest_data["workbook_sheets"] = list(
+                requested_workbook_sheets or outputs
+            )
             manifest_data["workbook_name"] = "resultado.xlsx"
             manifest_data["outputs"] = ["resultado.xlsx"]
         pipeline_validation = PipelineValidator.validate(manifest_data)
@@ -203,7 +223,7 @@ class MockAIService(AIService):
             ),
             inputs=inputs,
             outputs=outputs,
-            steps=steps,
+            steps=[OperationStep.model_validate(step) for step in steps],
             complexity="media" if reconciliation or len(inputs) > 1 else "baixa",
             pattern=pattern,
             project_id=project_id,
@@ -303,8 +323,19 @@ class MockAIService(AIService):
             pending = step.get("pending_confirmation", [])
             confidence = step.get("confidence", "alta" if parameters else "baixa")
             source = ["prompt"] if parameters else []
-            if keys and operation in {"join", "reconcile", "deduplicate"}:
-                source = ["perfil"] if not re.search(r"(?:por|pelo|pela|usando|chave)", prompt) else ["prompt"]
+            if operation in {"normalize", "validate"}:
+                confidence = "alta"
+                source = (
+                    ["prompt"]
+                    if mentions(prompt, operation)
+                    else ["regra_da_plataforma"]
+                )
+            if operation in {"join", "reconcile", "deduplicate"}:
+                explicit_keys = MockAIService._explicit_key_columns(prompt, keys)
+                if explicit_keys:
+                    source = ["prompt"]
+                elif keys:
+                    source = ["perfil"]
             reasons = {
                 "normalize": "padronizar nomes e formatos antes do processamento",
                 "deduplicate": "evitar que registros repetidos distorçam os resultados",
@@ -326,6 +357,124 @@ class MockAIService(AIService):
                 "pending_confirmation": pending,
             })
         return decisions
+
+    @staticmethod
+    def _plan_suggestions(
+        prompt: str,
+        steps: list[dict[str, Any]],
+        profile_metadata: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if any(
+            step.get("type", step.get("operation")) == "aggregate"
+            for step in steps
+        ):
+            return []
+        summary_requested = any(
+            term in prompt
+            for term in ("resumo", "agrupar", "agrupe", "totalizar")
+        )
+
+        profiles = profile_metadata.get("profiles", [])
+        candidate_columns = []
+        profile_candidate = None
+        profile_name = None
+        for profile in profiles:
+            for column in (
+                profile.get("required_columns", [])
+                + profile.get("critical_columns", [])
+                + profile.get("key_columns", [])
+            ):
+                if column not in candidate_columns:
+                    candidate_columns.append(column)
+            candidate = (profile.get("comparison") or {}).get("client_group")
+            if candidate and candidate in candidate_columns:
+                profile_candidate = candidate
+                profile_name = profile.get("name", profile.get("id", "perfil"))
+
+        if not summary_requested and not profile_candidate:
+            return []
+
+        reason = (
+            f"O perfil {profile_name} sugere agrupar por {profile_candidate}, "
+            "mas isso ainda precisa da sua confirmação."
+            if profile_candidate
+            else "O pedido menciona um resumo, mas não confirma a coluna de agrupamento."
+        )
+        parameters = {"group_by": profile_candidate} if profile_candidate else {}
+        return [
+            {
+                "operation": "aggregate",
+                "parameters": parameters,
+                "candidate_columns": candidate_columns,
+                "confidence": "baixa",
+                "source": ["perfil"] if profile_candidate else ["prompt"],
+                "reason": reason,
+                "message": "O MELLO identificou possível necessidade de agrupamento.",
+                "requires_confirmation": True,
+            }
+        ]
+
+    @classmethod
+    def _explicit_key_columns(
+        cls,
+        prompt: str,
+        known_keys: list[str],
+    ) -> list[str]:
+        match = re.search(
+            r"(?:usando|por|pelo|pela|chaves?(?: principal)?(?: de)?)\s+(.+?)"
+            r"(?=\s+e\s+(?:gerar|criar|produzir|exportar|identificar|entregar|validar)\b|[.;]|$)",
+            prompt,
+        )
+        if not match:
+            return []
+
+        phrase = match.group(1).strip(" ,:;")
+        normalized_phrase = cls._normalize(phrase)
+        operation_prefixes = (
+            "remover",
+            "remova",
+            "validar",
+            "valide",
+            "exportar",
+            "exporte",
+            "gerar",
+            "gere",
+            "criar",
+            "calcular",
+            "agrupar",
+            "filtrar",
+            "ordenar",
+            "deduplicar",
+        )
+
+        def is_operation_clause(value: str) -> bool:
+            normalized = cls._normalize(value).strip()
+            return any(
+                normalized.startswith(f"{prefix} ") or normalized == prefix
+                for prefix in operation_prefixes
+            )
+
+        matched_keys = [
+            key
+            for key in known_keys
+            if key
+            and cls._normalize(key) in normalized_phrase
+            and not is_operation_clause(key)
+        ]
+        if matched_keys:
+            return sorted(
+                dict.fromkeys(matched_keys),
+                key=lambda key: normalized_phrase.find(cls._normalize(key)),
+            )
+
+        explicit_keys = []
+        for item in re.split(r"\s*(?:,|\be\b)\s*", phrase):
+            candidate = item.strip(" .,:;")
+            if is_operation_clause(candidate):
+                break
+            if candidate:
+                explicit_keys.append(candidate)
+        return explicit_keys
 
     @staticmethod
     def _output_details(outputs: list[str], intent: dict[str, Any]) -> list[dict[str, Any]]:
@@ -410,6 +559,38 @@ class MockAIService(AIService):
         if any(term in prompt for term in cls.VALIDATION_TERMS):
             return "validation"
         return "generic"
+
+    @staticmethod
+    def _pattern_reason(
+        pattern: str,
+        intent: dict[str, Any],
+        profile_metadata: dict[str, Any],
+    ) -> str:
+        operations = intent.get("operations", [])
+        explicit_reconciliation = any(
+            operation in operations for operation in ("reconcile", "join")
+        )
+        if pattern == "reconciliation" and explicit_reconciliation:
+            return "O pedido menciona comparar, conciliar ou cruzar as fontes."
+        if pattern == "consolidation" and any(
+            operation in operations for operation in ("consolidate", "aggregate")
+        ):
+            return "O pedido solicita consolidar ou agrupar os dados."
+        if pattern == "validation" and "validate" in operations:
+            return "O pedido solicita validar os dados."
+        if pattern == "powerbi" and any(
+            term in operations for term in ("export", "aggregate")
+        ):
+            return "O pedido solicita preparar um dataset ou relatório para análise."
+
+        profiles = profile_metadata.get("profiles", [])
+        profile_names = [profile.get("name", profile.get("id", "perfil")) for profile in profiles]
+        if profile_names:
+            return (
+                f"O perfil de documento {', '.join(profile_names)} sugere o padrão "
+                f"{pattern}; confirme a intenção antes de aprovar."
+            )
+        return "Padrão genérico: nenhuma intenção específica foi confirmada no pedido."
 
     @classmethod
     def _is_reconciliation(
@@ -677,7 +858,9 @@ class MockAIService(AIService):
             step for step in steps if step.get("type") == "aggregate" and step.get("group_by")
         ]
         top_n_steps = [step for step in steps if step.get("type") == "top_n"]
-        if len(aggregate_steps) > 1 or top_n_steps:
+        if (len(aggregate_steps) > 1 or top_n_steps) and not intent.get(
+            "period_comparison"
+        ):
             explicit_outputs = [
                 f"totais_por_{step['group_by']}.xlsx" for step in aggregate_steps
             ]
@@ -691,15 +874,33 @@ class MockAIService(AIService):
             if explicit_outputs:
                 return explicit_outputs
         if intent.get("period_comparison"):
-            return [
-                "resumo_executivo.xlsx",
-                "nfs_perdidas.xlsx",
-                "nfs_novas.xlsx",
-                "analise_por_cliente.xlsx",
-                "analise_mensal.xlsx",
-                "top_perdas.xlsx",
-                "diagnostico.txt",
-            ]
+            period_outputs = ["nfs_perdidas.xlsx", "nfs_novas.xlsx"]
+            for step in aggregate_steps:
+                group_by = str(step["group_by"])
+                profile_group = next(
+                    (
+                        (profile.get("comparison") or {}).get("client_group")
+                        for profile in (profile_metadata or {}).get("profiles", [])
+                        if (profile.get("comparison") or {}).get("client_group")
+                    ),
+                    None,
+                )
+                output_name = (
+                    "analise_por_cliente.xlsx"
+                    if group_by == profile_group
+                    else f"totais_por_{group_by}.xlsx"
+                )
+                if output_name not in period_outputs:
+                    period_outputs.append(output_name)
+            for step in top_n_steps:
+                output_name = f"top_{step['limit']}_por_{step['group_by']}.xlsx"
+                if output_name not in period_outputs:
+                    period_outputs.append(output_name)
+            if "resumo executivo" in prompt:
+                period_outputs.append("resumo_executivo.xlsx")
+            if "diagnostico" in prompt:
+                period_outputs.append("diagnostico.txt")
+            return period_outputs
         if intent.get("explicit") and "consolidate" in intent.get("operations", []):
             return ["consolidado.xlsx"]
         profiles = (profile_metadata or {}).get("profiles", [])
@@ -736,6 +937,27 @@ class MockAIService(AIService):
         return ["resultado.xlsx"]
 
     @staticmethod
+    def _requested_workbook_sheets(prompt: str) -> list[str]:
+        match = re.search(
+            r"\babas?\b"
+            r"(?:\s+(?:com\s+(?:os\s+)?nomes?|chamadas?|s[aã]o|ser[aã]o))?"
+            r"\s*[:,=\-]?\s*(.+?)(?=[.;]|$)",
+            prompt,
+            re.IGNORECASE,
+        )
+        if not match:
+            return []
+
+        raw_names = re.split(r"\s*(?:,|;|\be\b|\n|•)\s*", match.group(1), flags=re.IGNORECASE)
+        names = []
+        for raw_name in raw_names:
+            name = raw_name.strip(" \t\r\n:=-–—'\"“”")
+            name = re.sub(r"\.(?:xlsx|csv)$", "", name, flags=re.IGNORECASE)
+            if name and name.casefold() not in {item.casefold() for item in names}:
+                names.append(name)
+        return names if len(names) > 1 else []
+
+    @staticmethod
     def _steps(
         prompt: str,
         reconciliation: bool,
@@ -748,25 +970,6 @@ class MockAIService(AIService):
             for key in profile.get("key_columns", []):
                 if key not in profile_keys:
                     profile_keys.append(key)
-        if intent.get("period_comparison") or (
-            not intent.get("explicit") and "period_comparison" in capabilities
-        ):
-            profiles = (profile_metadata or {}).get("profiles", [])
-            profile = profiles[0] if profiles else {}
-            comparison = profile.get("comparison", {})
-            return [
-                {"type": "normalize"},
-                {"type": "deduplicate", "key": comparison.get("key")},
-                {
-                    "type": "aggregate",
-                    "group_by": comparison.get("group_by"),
-                    "sum": comparison.get("sum", []),
-                    "collect": comparison.get("collect"),
-                },
-                {"type": "reconcile", "key": comparison.get("key")},
-                {"type": "aggregate", "group_by": comparison.get("client_group")},
-                {"type": "sort", "column": comparison.get("sort"), "descending": True},
-            ]
         steps: list[dict[str, Any]] = []
         if reconciliation or mentions(prompt, "normalize"):
             steps.append({"type": "normalize"})
@@ -821,11 +1024,24 @@ class MockAIService(AIService):
             re.search(r"\bvendas\s+sem\s+cliente\s+cadastrado\b", prompt)
         )
         if mentions(prompt, "join") or unmatched_customer_requested:
+            explicit_keys = MockAIService._explicit_key_columns(
+                prompt,
+                profile_keys,
+            )
             key_match = re.search(
                 r"(?:pelo|por|usando)\s+(documento|cnpj|cpf|nf|nota fiscal)",
                 prompt,
             )
-            key = key_match.group(1) if key_match else None
+            key_columns = explicit_keys or (
+                [key_match.group(1)] if key_match else []
+            )
+            key = (
+                key_columns[0]
+                if len(key_columns) == 1
+                else key_columns
+                if key_columns
+                else None
+            )
             join_step = {
                 "type": "join",
                 "left_key": key,
@@ -925,20 +1141,13 @@ class MockAIService(AIService):
             or "agrupe por" in prompt
             or "totalizar" in prompt
         ):
-            group_by = (
-                "empresa"
-                if "empresa" in prompt
-                else "cliente"
-                if "cliente" in prompt
-                else None
+            group_match = re.search(
+                r"(?:resumo|agrupar|agrupe|totalizar|total)\s+(?:dos\s+|de\s+)?por\s+([a-zà-ú][\wà-ú]*)",
+                prompt,
             )
-            aggregate_step = {"type": "aggregate", "group_by": group_by}
-            if group_by is None:
-                aggregate_step.update(
-                    confidence="baixa",
-                    pending_confirmation=["agrupamento"],
-                )
-            steps.append(aggregate_step)
+            group_by = group_match.group(1) if group_match else None
+            if group_by is not None:
+                steps.append({"type": "aggregate", "group_by": group_by})
         top_n_groups: set[tuple[int, str]] = set()
         for top_match in re.finditer(
             r"identificar\s+os\s+(\d+)\s+([a-zà-ú][\wà-ú]*?)s?\s+com\s+maior\s+([a-zà-ú][\wà-ú]*)",
@@ -990,11 +1199,13 @@ class MockAIService(AIService):
                 "pending_confirmation": ["chave_join"],
             })
         if reconciliation:
+            key_columns = MockAIService._explicit_key_columns(prompt, profile_keys)
+            key_columns = key_columns or profile_keys
             key = (
-                profile_keys[0]
-                if len(profile_keys) == 1
-                else profile_keys
-                if profile_keys
+                key_columns[0]
+                if len(key_columns) == 1
+                else key_columns
+                if key_columns
                 else None
             )
             step = {
@@ -1010,11 +1221,13 @@ class MockAIService(AIService):
                 **step,
             })
         elif mentions(prompt, "reconcile"):
+            key_columns = MockAIService._explicit_key_columns(prompt, profile_keys)
+            key_columns = key_columns or profile_keys
             key = (
-                profile_keys[0]
-                if len(profile_keys) == 1
-                else profile_keys
-                if profile_keys
+                key_columns[0]
+                if len(key_columns) == 1
+                else key_columns
+                if key_columns
                 else None
             )
             steps.append({
@@ -1029,7 +1242,10 @@ class MockAIService(AIService):
                     else {}
                 ),
             })
-        if mentions(prompt, "validate"):
+        if (reconciliation or mentions(prompt, "validate")) and not any(
+            step.get("type", step.get("operation")) == "validate"
+            for step in steps
+        ):
             steps.append({"type": "validate"})
         if mentions(prompt, "export"):
             steps.append({"type": "export"})

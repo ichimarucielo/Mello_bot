@@ -1,39 +1,79 @@
-import argparse
+import pandas as pd
 import logging
 from pathlib import Path
+import argparse
+from typing import List
 
-import pandas as pd
-
-
+logger = logging.getLogger(__name__)
 REQUIRED_FILES = {{ REQUIRED_FILES }}
 OUTPUTS = {{ OUTPUTS }}
-PIPELINE_STEPS = {{ STEPS }}
 OUTPUT_FOLDER = {{ OUTPUT_FOLDER }}
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+PROJECT_NAME = {{ PROJECT_NAME }}
 
 
-def read_input(file_path: str) -> pd.DataFrame:
-    path = Path(file_path)
-    if path.suffix.lower() == ".csv":
-        return pd.read_csv(path, sep=";")
-    return pd.read_excel(path)
+def standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    result = df.copy()
+    result.columns = [
+        str(column).strip().lower().replace(" ", "_").replace("-", "_")
+        for column in result.columns
+    ]
+    return result
 
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description={{ PROJECT_NAME }})
+def parse_args():
+    parser = argparse.ArgumentParser(description=PROJECT_NAME)
     for required_file in REQUIRED_FILES:
         parser.add_argument(required_file["cli_argument"], required=True)
-    args = parser.parse_args()
-    frames = [read_input(getattr(args, item["argument_name"])) for item in REQUIRED_FILES]
-    consolidated = pd.concat(frames, ignore_index=True)
+    return parser.parse_args()
 
-    output_folder = Path(OUTPUT_FOLDER)
-    output_folder.mkdir(parents=True, exist_ok=True)
-    for output_name in OUTPUTS:
-        consolidated.to_excel(output_folder / output_name, index=False)
-    logger.info("Consolidacao concluida: %s", {{ PROJECT_ID }})
+def load_data(file_path: Path) -> pd.DataFrame:
+    """Carrega dados do arquivo suportando CSV e XLSX"""
+    if file_path.suffix.lower() == '.csv':
+        df = pd.read_csv(file_path, sep=';')
+    elif file_path.suffix.lower() in ['.xlsx', '.xls']:
+        df = pd.read_excel(file_path)
+    else:
+        raise ValueError(f"Formato não suportado: {file_path.suffix}")
+    
+    # Padroniza nomes de colunas
+    return standardize_column_names(df)
 
+def validate_inputs(dfs: List[pd.DataFrame]) -> None:
+    if not dfs:
+        raise ValueError("Nenhum arquivo de entrada foi informado.")
+    for index, frame in enumerate(dfs, start=1):
+        if frame.empty:
+            logger.warning("Arquivo %s está vazio", index)
+
+def consolidate_data(dfs: List[pd.DataFrame]) -> pd.DataFrame:
+    """Empilha linhas dos arquivos mensais, preservando todas as colunas."""
+    return pd.concat(dfs, ignore_index=True, sort=False)
+
+def main():
+    args = parse_args()
+    
+    try:
+        input_paths = [
+            getattr(args, item["argument_name"])
+            for item in REQUIRED_FILES
+        ]
+        dfs = [load_data(Path(file_path)) for file_path in input_paths]
+        validate_inputs(dfs)
+        result = consolidate_data(dfs)
+
+        output_folder = Path(OUTPUT_FOLDER)
+        output_folder.mkdir(parents=True, exist_ok=True)
+        for output_name in OUTPUTS:
+            output_path = output_folder / output_name
+            if output_path.suffix.lower() == ".csv":
+                result.to_csv(output_path, index=False, sep=";")
+            else:
+                result.to_excel(output_path, index=False)
+            
+        logger.info("Consolidação concluída com sucesso!")
+        
+    except Exception as e:
+        logger.error(f"Erro na consolidação: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()

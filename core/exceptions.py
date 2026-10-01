@@ -11,3 +11,22 @@ class TimeoutExecutionError(RuntimeError):
         super().__init__(
             f"Execução do projeto '{project_id}' excedeu o timeout de {timeout_seconds} segundos."
         )
+class MelloBotException(Exception):
+    """Base exception for MELLO BOT"""
+    pass
+
+class ProjectNotFoundError(MelloBotException):
+    """Raised when a project is not found"""
+    pass
+
+class FileProcessingError(MelloBotException):
+    """Raised when there's an error processing a file"""
+    pass
+
+class ValidationError(MelloBotException):
+    """Raised when validation fails"""
+    pass
+
+class ExecutionError(MelloBotException):
+    """Raised when execution fails"""
+    pass

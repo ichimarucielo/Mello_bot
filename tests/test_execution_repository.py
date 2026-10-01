@@ -51,6 +51,27 @@ def test_sqlite_repository_migrates_json_logs(tmp_path):
     assert repository.list() == [payload]
 
 
+def test_sqlite_repository_persists_automation_requests(tmp_path):
+    repository = SQLiteExecutionRepository(tmp_path / "mello.db")
+
+    repository.save_automation_request(
+        sharepoint_id=1,
+        title="Financeiro",
+        request="Comparar faturamento por NF.",
+        complexity="media",
+        suggested_project_id="conciliacao_faturamento",
+    )
+
+    requests = repository.list_automation_requests()
+
+    assert len(requests) == 1
+    assert requests[0]["sharepoint_id"] == 1
+    assert requests[0]["title"] == "Financeiro"
+    assert requests[0]["request"] == "Comparar faturamento por NF."
+    assert requests[0]["suggested_project_id"] == "conciliacao_faturamento"
+    assert requests[0]["status"] == "novo"
+
+
 def test_json_repository_keeps_existing_file_contract(tmp_path):
     repository = JsonExecutionRepository(tmp_path)
     payload = _payload("exec-json", "2026-09-02T10:00:00")

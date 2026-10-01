@@ -22,6 +22,8 @@ class HealthService:
                 "project_path": False,
                 "entrypoint": False,
                 "outputs": False,
+                "outputs_configured": False,
+                "healthy": False,
                 "error": None,
             }
             try:
@@ -29,11 +31,12 @@ class HealthService:
                     ManifestGenerator.read_manifest_yaml(manifest_path)
                 )
                 item["valid"] = True
-                item["project_path"] = (BASE_DIR / manifest.project_path).exists()
                 project_path = (BASE_DIR / manifest.project_path).resolve()
-                item["entrypoint"] = (
-                    project_path / manifest.entrypoint.script
-                ).exists()
+                item["project_path"] = project_path.is_dir()
+                item["entrypoint"] = (project_path / manifest.entrypoint.script).is_file()
+                item["outputs_configured"] = bool(manifest.outputs) and all(
+                    output.strip() for output in manifest.outputs
+                )
                 output_folder = project_path / getattr(
                     manifest,
                     "output_folder",
@@ -42,15 +45,27 @@ class HealthService:
                 item["outputs"] = all(
                     (output_folder / output).exists()
                     for output in manifest.outputs
+                ) and bool(manifest.outputs)
+                item["healthy"] = all(
+                    (
+                        item["valid"],
+                        item["project_path"],
+                        item["entrypoint"],
+                        item["outputs_configured"],
+                    )
                 )
                 valid_count += 1
             except Exception as error:
                 item["error"] = str(error)
             details.append(item)
 
+        healthy_count = sum(item["healthy"] for item in details)
         return {
             "manifest_count": len(manifests),
             "valid_manifests": valid_count,
+            "healthy_projects": healthy_count,
+            "unhealthy_projects": len(manifests) - healthy_count,
+            "outputs_configured": sum(item["outputs_configured"] for item in details),
             "projects_found": sum(item["project_path"] for item in details),
             "valid_paths": sum(item["project_path"] for item in details),
             "entrypoints_found": sum(item["entrypoint"] for item in details),
@@ -73,6 +88,8 @@ class HealthService:
             "count": len(manifests),
             "valid": 0,
             "invalid": 0,
+            "healthy_projects": 0,
+            "projects_needing_attention": 0,
             "items": [],
         }
 
@@ -102,27 +119,58 @@ class HealthService:
         except Exception as error:
             sqlite_errors = str(error)
 
+        problems = []
+        healthy_project_count = 0
         external_projects = []
         for manifest_path in manifests:
             try:
                 manifest = load_manifest(manifest_path.stem)
                 project_dir = (BASE_DIR / manifest.project_path).resolve()
+                project_exists = project_dir.is_dir()
+                entrypoint_exists = (
+                    project_dir / manifest.entrypoint.script
+                ).is_file()
+                outputs_configured = bool(manifest.outputs) and all(
+                    output.strip() for output in manifest.outputs
+                )
+                healthy = (
+                    project_exists
+                    and entrypoint_exists
+                    and outputs_configured
+                )
+                if healthy:
+                    healthy_project_count += 1
+                if not project_exists:
+                    problems.append(f"project_path_missing:{manifest.id}")
+                if project_exists and not entrypoint_exists:
+                    problems.append(f"entrypoint_missing:{manifest.id}")
+                if not outputs_configured:
+                    problems.append(f"outputs_not_configured:{manifest.id}")
                 external_projects.append({
                     "id": manifest.id,
                     "path": str(project_dir),
-                    "exists": project_dir.exists(),
-                    "entrypoint_exists": (project_dir / manifest.entrypoint.script).exists(),
+                    "exists": project_exists,
+                    "entrypoint_exists": entrypoint_exists,
+                    "outputs_configured": outputs_configured,
+                    "healthy": healthy,
                     "output_folder": str(project_dir / getattr(manifest, "output_folder", "data/output")),
                 })
             except Exception as error:
+                problems.append(f"project_manifest_invalid:{manifest_path.stem}")
                 external_projects.append({
                     "id": manifest_path.stem,
                     "path": str(manifest_path),
                     "exists": False,
                     "entrypoint_exists": False,
+                    "outputs_configured": False,
+                    "healthy": False,
                     "output_folder": None,
                     "error": str(error),
                 })
+        manifest_status["healthy_projects"] = healthy_project_count
+        manifest_status["projects_needing_attention"] = (
+            len(manifests) - healthy_project_count
+        )
 
         output_status = []
         for manifest_path in manifests:
@@ -130,10 +178,22 @@ class HealthService:
                 manifest = load_manifest(manifest_path.stem)
                 project_dir = (BASE_DIR / manifest.project_path).resolve()
                 output_dir = project_dir / getattr(manifest, "output_folder", "data/output")
+                generated_outputs = [
+                    output
+                    for output in manifest.outputs
+                    if (output_dir / output).is_file()
+                ]
                 output_status.append({
                     "project_id": manifest.id,
                     "output_dir": str(output_dir),
                     "exists": output_dir.exists(),
+                    "configured": bool(manifest.outputs),
+                    "generated": generated_outputs,
+                    "missing": [
+                        output
+                        for output in manifest.outputs
+                        if output not in generated_outputs
+                    ],
                     "files": [p.name for p in output_dir.glob("*") if p.is_file()] if output_dir.exists() else [],
                 })
             except Exception as error:
@@ -141,6 +201,9 @@ class HealthService:
                     "project_id": manifest_path.stem,
                     "output_dir": None,
                     "exists": False,
+                    "configured": False,
+                    "generated": [],
+                    "missing": [],
                     "files": [],
                     "error": str(error),
                 })
@@ -161,7 +224,6 @@ class HealthService:
                     "error": str(error),
                 })
 
-        problems = []
         if not python_ok:
             problems.append("python_unavailable")
         if manifest_status["invalid"]:
@@ -169,9 +231,18 @@ class HealthService:
         if not sqlite_ok:
             problems.append("sqlite_unavailable")
 
-        status = "ok"
-        if problems:
-            status = "warning" if problems and len(problems) < 3 else "error"
+        critical_problems = {
+            "python_unavailable",
+            "invalid_manifest",
+            "sqlite_unavailable",
+        }
+        status = (
+            "error"
+            if any(problem in critical_problems for problem in problems)
+            else "warning"
+            if problems
+            else "ok"
+        )
 
         return {
             "status": status,

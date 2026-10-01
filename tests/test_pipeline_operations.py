@@ -83,11 +83,32 @@ def test_pipeline_validator_checks_operation_parameters():
     result = PipelineValidator.validate({**base, "steps": invalid_steps})
 
     assert not result["valid"]
-    assert any("calculate requer" in error for error in result["errors"])
-    assert any("aggregate requer" in error for error in result["errors"])
-    assert any("rename_columns requer" in error for error in result["errors"])
-    assert any("drop_columns requer" in error for error in result["errors"])
-    assert any("reconcile requer" in error for error in result["errors"])
+    assert any("(calculate): requer formula" in error for error in result["errors"])
+    assert any("(aggregate): requer group_by" in error for error in result["errors"])
+    assert any("(rename_columns): requer mapping" in error for error in result["errors"])
+    assert any("(drop_columns): requer columns" in error for error in result["errors"])
+    assert any("(reconcile): requer key" in error for error in result["errors"])
+
+
+def test_pipeline_validator_accepts_composite_cnpj_key():
+    result = PipelineValidator.validate(
+        {
+            "required_files": [{"id": "left"}, {"id": "right"}],
+            "outputs": ["result.xlsx"],
+            "steps": [
+                {
+                    "operation": "reconcile",
+                    "parameters": {
+                        "key": ["CNPJ", "documento"],
+                        "normalize_key": True,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert result["valid"]
+    assert result["errors"] == []
 
 
 def test_operation_step_accepts_null_editor_metadata():

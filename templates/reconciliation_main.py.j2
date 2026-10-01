@@ -1,68 +1,288 @@
-import argparse
+import pandas as pd
 import logging
 from pathlib import Path
+import argparse
+import re
+import unicodedata
 
-import pandas as pd
-
-
+logger = logging.getLogger(__name__)
 REQUIRED_FILES = {{ REQUIRED_FILES }}
 OUTPUTS = {{ OUTPUTS }}
-OUTPUT_MODE = {{ OUTPUT_MODE }}
-WORKBOOK_SHEETS = {{ WORKBOOK_SHEETS }}
 PIPELINE_STEPS = {{ STEPS }}
 OUTPUT_FOLDER = {{ OUTPUT_FOLDER }}
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+PROJECT_NAME = {{ PROJECT_NAME }}
+OUTPUT_MODE = {{ OUTPUT_MODE }}
+WORKBOOK_SHEETS = {{ WORKBOOK_SHEETS }}
 
 
-def read_input(file_path: str) -> pd.DataFrame:
-    path = Path(file_path)
-    if path.suffix.lower() == ".csv":
-        return pd.read_csv(path, sep=";")
-    return pd.read_excel(path)
+def detect_key_type(key: str) -> str | None:
+    key_lower = str(key).lower()
+    if "cnpj" in key_lower or "inscricao" in key_lower:
+        return "cnpj"
+    if "cpf" in key_lower:
+        return "cpf"
+    return None
 
 
-def reconcile(left: pd.DataFrame, right: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    common_columns = [column for column in left.columns if column in right.columns]
-    if not common_columns:
-        raise ValueError("Nenhuma coluna comum encontrada para a conciliacao.")
-    merged = left.merge(right, on=common_columns, how="outer", indicator=True, suffixes=("_left", "_right"))
-    matched = merged[merged["_merge"] == "both"].drop(columns=["_merge"])
-    divergences = merged[merged["_merge"] != "both"].drop(columns=["_merge"])
-    return matched, divergences
+def normalize_key(series: pd.Series, key_type: str) -> pd.Series:
+    expected_length = {"cnpj": 14, "cpf": 11}.get(key_type)
+
+    def normalize(value: object) -> object:
+        if pd.isna(value):
+            return pd.NA
+        if isinstance(value, float):
+            if not value.is_integer():
+                return pd.NA
+            value = int(value)
+        raw = str(value).strip()
+        if not expected_length:
+            return raw
+        digits = re.sub(r"[^\d]", "", raw)
+        if expected_length and digits and len(digits) <= expected_length:
+            return digits.zfill(expected_length)
+        return digits
+
+    return series.map(normalize)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description={{ PROJECT_NAME }})
+def validate_key_format(key: object, key_type: str) -> bool:
+    expected_length = {"cnpj": 14, "cpf": 11}[key_type]
+    return len(str(key)) == expected_length and str(key).isdigit()
+
+
+def reconcile_dataframes(
+    left_df: pd.DataFrame,
+    right_df: pd.DataFrame,
+    key: str | list[str] | None,
+) -> pd.DataFrame:
+    left = left_df.copy()
+    right = right_df.copy()
+    key_columns = [key] if isinstance(key, str) else list(key or [])
+    if not key_columns:
+        raise ValueError("A chave de conciliação não foi definida.")
+
+    missing_columns = [
+        column for column in key_columns
+        if column not in left.columns or column not in right.columns
+    ]
+    if missing_columns:
+        raise KeyError(f"Chaves ausentes nas bases: {', '.join(missing_columns)}")
+
+    for column in key_columns:
+        key_type = detect_key_type(column) or "default"
+        left[column] = normalize_key(left[column], key_type)
+        right[column] = normalize_key(right[column], key_type)
+
+    left_has_key = left[key_columns].notna().all(axis=1)
+    right_has_key = right[key_columns].notna().all(axis=1)
+    for column in key_columns:
+        left_has_key &= left[column].ne("")
+        right_has_key &= right[column].ne("")
+    merged = pd.merge(
+        left.loc[left_has_key],
+        right.loc[right_has_key],
+        on=key_columns,
+        how="outer",
+        indicator=True,
+        suffixes=("_left", "_right"),
+    )
+    merged["status"] = merged.pop("_merge").map(
+        {"both": "match", "left_only": "left_only", "right_only": "right_only"}
+    )
+
+    left_without_key = left.loc[~left_has_key].merge(
+        right.iloc[0:0],
+        on=key_columns,
+        how="left",
+        suffixes=("_left", "_right"),
+    )
+    left_without_key["status"] = "left_only"
+    right_without_key = left.iloc[0:0].merge(
+        right.loc[~right_has_key],
+        on=key_columns,
+        how="right",
+        suffixes=("_left", "_right"),
+    )
+    right_without_key["status"] = "right_only"
+    return pd.concat(
+        [merged, left_without_key, right_without_key], ignore_index=True
+    )
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=PROJECT_NAME)
     for required_file in REQUIRED_FILES:
         parser.add_argument(required_file["cli_argument"], required=True)
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    frames = [read_input(getattr(args, item["argument_name"])) for item in REQUIRED_FILES]
-    if len(frames) < 2:
-        raise ValueError("O padrao de conciliacao exige pelo menos dois inputs.")
+def load_data(file_path: Path) -> pd.DataFrame:
+    """Carrega dados do arquivo suportando CSV e XLSX"""
+    if file_path.suffix.lower() == '.csv':
+        return pd.read_csv(file_path, sep=';')
+    elif file_path.suffix.lower() in ['.xlsx', '.xls']:
+        return pd.read_excel(file_path)
+    else:
+        raise ValueError(f"Formato não suportado: {file_path.suffix}")
 
-    conciliados, divergencias = reconcile(frames[0], frames[1])
-    output_folder = Path(OUTPUT_FOLDER)
-    output_folder.mkdir(parents=True, exist_ok=True)
-    output_map = {
-        "conciliacao.xlsx": conciliados,
-        "divergencias.xlsx": divergencias,
-    }
-    if OUTPUT_MODE == "workbook":
-        workbook_path = output_folder / OUTPUTS[0]
-        with pd.ExcelWriter(workbook_path, engine="openpyxl") as writer:
-            for sheet_name in WORKBOOK_SHEETS:
-                safe_sheet_name = str(sheet_name).replace(".xlsx", "")[:31] or "Resultado"
-                frame = divergencias if "perd" in safe_sheet_name.lower() else conciliados
-                frame.to_excel(writer, sheet_name=safe_sheet_name, index=False)
-        logger.info("Workbook com abas gerado: %s", workbook_path)
-        return
-    for output_name in OUTPUTS:
-        output_map.get(output_name, divergencias).to_excel(output_folder / output_name, index=False)
-    logger.info("Conciliacao base concluida: %s", {{ PROJECT_ID }})
-    # TODO: implementar regras de negocio, chaves e classificacoes especificas.
+def validate_inputs(left_df: pd.DataFrame, right_df: pd.DataFrame, key: str) -> None:
+    """Valida formatos fiscais para as colunas configuradas que existem."""
+    key_columns = [key] if isinstance(key, str) else list(key or [])
+    for column in key_columns:
+        if column not in left_df.columns or column not in right_df.columns:
+            continue
+        key_type = detect_key_type(column)
+        if not key_type:
+            continue
 
+        for label, frame in (("esquerda", left_df), ("direita", right_df)):
+            normalized = normalize_key(frame[column], key_type)
+            invalid = ~normalized.map(
+                lambda value: validate_key_format(value, key_type)
+                if pd.notna(value) else False
+            )
+            if invalid.any():
+                logger.warning(
+                    "Base %s tem %s registros com chave '%s' inválida",
+                    label,
+                    int(invalid.sum()),
+                    column,
+                )
+
+def reconcile(left_df: pd.DataFrame, right_df: pd.DataFrame, key: str) -> pd.DataFrame:
+    """Executa a reconciliação e classifica cada registro pelo merge."""
+    logger.info("Preparando bases para reconciliação com chave '%s'", key)
+    result = reconcile_dataframes(left_df, right_df, key)
+
+    logger.info(f"Reconciliação concluída:")
+    logger.info(f"- Registros combinados: {len(result[result['status'] == 'match'])}")
+    logger.info(f"- Registros apenas na esquerda: {len(result[result['status'] == 'left_only'])}")
+    logger.info(f"- Registros apenas na direita: {len(result[result['status'] == 'right_only'])}")
+    return result
+
+
+def execute_reconciliation(left_df: pd.DataFrame, right_df: pd.DataFrame, key: str) -> pd.DataFrame:
+    return reconcile(left_df, right_df, key)
+
+
+def workbook_summary(result: pd.DataFrame) -> pd.DataFrame:
+    status_counts = result["status"].value_counts()
+    return pd.DataFrame(
+        [
+            {"Indicador": "Total de registros", "Quantidade": len(result)},
+            {"Indicador": "Conciliados", "Quantidade": int(status_counts.get("match", 0))},
+            {"Indicador": "Divergentes", "Quantidade": int(len(result) - status_counts.get("match", 0))},
+            {"Indicador": "Apenas base esquerda", "Quantidade": int(status_counts.get("left_only", 0))},
+            {"Indicador": "Apenas base direita", "Quantidade": int(status_counts.get("right_only", 0))},
+        ]
+    )
+
+
+def workbook_sheet_data(
+    result: pd.DataFrame,
+    requested_name: str,
+    sheet_index: int,
+    only_index: int,
+) -> tuple[str, pd.DataFrame, int]:
+    sheet_name = Path(requested_name).stem.strip() or f"Aba {sheet_index + 1}"
+    normalized_name = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", sheet_name.casefold())
+        if not unicodedata.combining(character)
+    )
+    if "resumo" in normalized_name or "executivo" in normalized_name:
+        output_df = workbook_summary(result)
+    elif "diverg" in normalized_name:
+        output_df = result[result["status"] != "match"]
+    elif "concili" in normalized_name or "match" in normalized_name:
+        output_df = result[result["status"] == "match"]
+    elif "apenas" in normalized_name or "somente" in normalized_name:
+        source_index = next(
+            (
+                index
+                for index, required_file in enumerate(REQUIRED_FILES[:2])
+                if required_file["id"].replace("_", " ").casefold() in normalized_name
+            ),
+            None,
+        )
+        if source_index is None:
+            source_index = only_index % 2
+            only_index += 1
+        status = "left_only" if source_index == 0 else "right_only"
+        output_df = result[result["status"] == status]
+    else:
+        default_frames = [
+            workbook_summary(result),
+            result[result["status"] == "match"],
+            result[result["status"] != "match"],
+            result[result["status"] == "left_only"],
+            result[result["status"] == "right_only"],
+        ]
+        output_df = (
+            default_frames[sheet_index]
+            if sheet_index < len(default_frames)
+            else result
+        )
+
+    safe_sheet_name = re.sub(r"[\\/*?:\[\]]", "_", sheet_name)[:31]
+    return safe_sheet_name, output_df, only_index
+
+def main():
+    args = parse_args()
+    
+    try:
+        frames = [
+            load_data(Path(getattr(args, item["argument_name"])))
+            for item in REQUIRED_FILES
+        ]
+        if len(frames) != 2:
+            raise ValueError("A reconciliação requer exatamente duas entradas.")
+
+        key = next(
+            (
+                step.get("parameters", {}).get("key")
+                for step in PIPELINE_STEPS
+                if step.get("operation") in {"join", "reconcile"}
+            ),
+            None,
+        )
+        
+        validate_inputs(frames[0], frames[1], key)
+        
+        result = execute_reconciliation(frames[0], frames[1], key)
+        
+        output_folder = Path(OUTPUT_FOLDER)
+        output_folder.mkdir(parents=True, exist_ok=True)
+        if OUTPUT_MODE == "workbook" and len(OUTPUTS) == 1:
+            output_path = output_folder / OUTPUTS[0]
+            sheet_names = WORKBOOK_SHEETS or ["conciliados", "divergencias"]
+            with pd.ExcelWriter(output_path) as writer:
+                only_index = 0
+                for index, requested_name in enumerate(sheet_names):
+                    sheet_name, output_df, only_index = workbook_sheet_data(
+                        result,
+                        requested_name,
+                        index,
+                        only_index,
+                    )
+                    output_df.to_excel(writer, sheet_name=sheet_name, index=False)
+        else:
+            for output_name in OUTPUTS:
+                output_path = output_folder / output_name
+                if "diverg" in output_name.lower():
+                    output_df = result[result["status"] != "match"]
+                elif "concil" in output_name.lower():
+                    output_df = result[result["status"] == "match"]
+                else:
+                    output_df = result
+                if output_path.suffix.lower() == ".csv":
+                    output_df.to_csv(output_path, index=False, sep=";")
+                else:
+                    output_df.to_excel(output_path, index=False)
+            
+        logger.info("Reconciliação concluída com sucesso!")
+        
+    except Exception as e:
+        logger.error(f"Erro na reconciliação: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()

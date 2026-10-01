@@ -1,24 +1,27 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+import logging
 from core.executor import Executor
-from core.models import Manifest
+from core.models import Manifest, RunProjectResult, ExecutionContext
 from core.output_validator import OutputValidator
 from core.registry import load_projects
 from core.settings import BASE_DIR, INPUTS_DIR
 from core.upload_mapper import UploadMapper
-from core.exceptions import ProjectNotFoundError
-from core.models import RunProjectResult
+from core.exceptions import ProjectNotFoundError, FileProcessingError
 from core.enums import ExecutionStatus
 from core.execution_logger import ExecutionLogger
-from core.models import ExecutionContext
-from datetime import datetime
 from core.file_manager import FileManager
 from core.validator import Validator
 from core.manifest_generator import ManifestGenerator
 from core.project_scaffolder import ProjectScaffolder
 from core.health_service import HealthService
 from core.storage_provider import get_storage_provider
+from datetime import datetime
+from core.template_engine import TemplateEngine
 
+
+
+logger = logging.getLogger(__name__)
 
 class Orchestrator:
 
@@ -92,45 +95,25 @@ class Orchestrator:
         return list(load_projects().values())
 
     @staticmethod
-    def get_project(
-        project_id: str,
-    ) -> Manifest:
-
+    def get_project(project_id: str) -> Manifest:
         project = load_projects().get(project_id)
-
         if not project:
-            raise ProjectNotFoundError(
-                f"Projeto não encontrado: {project_id}"
-            )
-
+            raise ProjectNotFoundError(f"Projeto não encontrado: {project_id}")
         return project
 
     @staticmethod
-    def build_project_files(
-        project_id: str,
-        project: Manifest,
-    ) -> dict[str, str]:
-
+    def build_project_files(project_id: str, project: Manifest) -> dict[str, str]:
         inputs_folder = INPUTS_DIR / project_id
-
         return {
             required_file.id: str(
-                inputs_folder /
-                f"{required_file.id}.{required_file.accepted_extensions[0]}"
+                inputs_folder / f"{required_file.id}.{required_file.accepted_extensions[0]}"
             )
             for required_file in project.required_files
         }
 
     @staticmethod
-    def get_project_output_folder(
-        project: Manifest,
-    ) -> Path:
-
-        output_folder = getattr(
-            project,
-            "output_folder",
-            "data/output",
-        )
+    def get_project_output_folder(project: Manifest) -> Path:
+        output_folder = getattr(project, "output_folder", "data/output")
         return BASE_DIR / project.project_path / output_folder
 
     @staticmethod
@@ -187,17 +170,28 @@ class Orchestrator:
                 if not result["valid"]:
                     all_valid = False
 
-            except Exception:
-                validation_results.append(
-                    {
-                        "file_id": file_id,
-                        "display_name": file_definition.display_name,
-                        "valid": False,
-                        "score": 0,
-                        "missing_columns": [],
-                        "error": "Erro ao processar arquivo",
-                    }
-                )
+            except FileProcessingError as e:
+                logger.error(f"Erro ao processar arquivo {file_id}: {str(e)}")
+                validation_results.append({
+                    "file_id": file_id,
+                    "display_name": file_definition.display_name,
+                    "valid": False,
+                    "score": 0,
+                    "missing_columns": [],
+                    "error": str(e),
+                })
+                all_valid = False
+
+            except Exception as e:
+                logger.error(f"Erro inesperado ao processar arquivo {file_id}: {str(e)}")
+                validation_results.append({
+                    "file_id": file_id,
+                    "display_name": file_definition.display_name,
+                    "valid": False,
+                    "score": 0,
+                    "missing_columns": [],
+                    "error": f"Erro inesperado: {str(e)}",
+                })
                 all_valid = False
 
         return validation_results, all_valid
@@ -214,11 +208,10 @@ class Orchestrator:
         cls,
         project_id: str,
         uploaded_files: list[Any],
-        execution_id: str | None = None,
+        execution_id: Optional[str] = None,
     ) -> RunProjectResult:
-
         project = cls.get_project(project_id)
-
+        
         mapped_files = UploadMapper.map_uploaded_files(
             project_id=project_id,
             uploaded_files=uploaded_files,
@@ -248,17 +241,9 @@ class Orchestrator:
             files=project_files,
         )
 
-        execution_result.execution_id = (
-            execution_id
-        )
-
-        execution_result.started_at = (
-            context.started_at
-        )
-
-        execution_result.finished_at = (
-            datetime.now()
-        )
+        execution_result.execution_id = execution_id
+        execution_result.started_at = context.started_at
+        execution_result.finished_at = datetime.now()
         execution_result.user = "Usuário Local"
         execution_result.uploaded_files = [
             getattr(uploaded_file, "name", "arquivo")
@@ -278,15 +263,29 @@ class Orchestrator:
         ExecutionLogger.save(execution_result)
 
         if execution_result.status == ExecutionStatus.FAILED:
-            raise RuntimeError(execution_result.error_message)
+            raw_error = execution_result.error_message or "Erro desconhecido na execução do ETL."
+            if "merge on int64 and str" in raw_error:
+                raw_error += "\n\n[DICA MELLO BOT]: Você está tentando cruzar dados com tipos diferentes (int e texto) na chave de merge. Normalize a coluna para string e remada formatação antes do merge usando astype(str)."
+            logger.error(f"Execução falhou para projeto {project_id}: {raw_error}")
+            raise RuntimeError(raw_error)
 
         return RunProjectResult(
             status=execution_result.status.value,
-            mapped_files=list(
-                mapped_files.keys()
-            ),
-            outputs=[
-                output["name"]
-                for output in output_result["found"]
-            ],
+            mapped_files=list(mapped_files.keys()),
+            outputs=[output["name"] for output in output_result["found"]],
         )
+
+@classmethod
+def generate_project_script(cls, project: Manifest) -> str:
+    """Gera o script do projeto usando o template adequado"""
+    template_engine = TemplateEngine()
+    template_name = project.pattern or "generic"
+    
+    # Renderiza o template com os dados do projeto
+    script = template_engine.render(
+        f"{template_name}_main.py.j2",
+        project=project
+    )
+    
+    return script
+###PATH:core\execution_logger.py

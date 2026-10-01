@@ -1,0 +1,135 @@
+import pandas as pd
+import logging
+from pathlib import Path
+import argparse
+from typing import List, Dict, Any
+from core.utils import detect_key_type, validate_key_format, standardize_column_names
+
+logger = logging.getLogger(__name__)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Script de agregação de dados")
+    parser.add_argument("--input", required=True, help="Arquivo de entrada")
+    parser.add_argument("--output", required=True, help="Arquivo de saída")
+    parser.add_argument("--group_by", required=True, nargs='+', 
+                       help="Colunas para agrupamento")
+    parser.add_argument("--aggregations", required=True, nargs='+',
+                       help="Operações de agregação (ex: sum:valor, count:codigo)")
+    return parser.parse_args()
+
+def load_data(file_path: Path) -> pd.DataFrame:
+    """Carrega dados do arquivo suportando CSV e XLSX"""
+    if file_path.suffix.lower() == '.csv':
+        df = pd.read_csv(file_path, sep=';')
+    elif file_path.suffix.lower() in ['.xlsx', '.xls']:
+        df = pd.read_excel(file_path)
+    else:
+        raise ValueError(f"Formato não suportado: {file_path.suffix}")
+    
+    # Padroniza nomes de colunas
+    return standardize_column_names(df)
+
+def validate_inputs(df: pd.DataFrame, group_by: List[str]) -> None:
+    """Valida se as colunas de agrupamento existem e estão no formato correto"""
+    missing_cols = [col for col in group_by if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Colunas de agrupamento não encontradas: {missing_cols}")
+    
+    # Valida formato de chaves sensíveis
+    for col in group_by:
+        key_type = detect_key_type(col)
+        if key_type:
+            invalid = df[~df[col].apply(lambda x: validate_key_format(str(x), key_type))]
+            if not invalid.empty:
+                logger.warning(f"Coluna '{col}' tem {len(invalid)} registros com formato inválido")
+
+def parse_aggregations(aggregations: List[str]) -> Dict[str, List[str]]:
+    """Converte lista de agregations para dicionário"""
+    result = {}
+    for agg in aggregations:
+        if ':' not in agg:
+            raise ValueError(f"Formato de agregação inválido: {agg}")
+        operation, column = agg.split(':', 1)
+        if operation not in result:
+            result[operation] = []
+        result[operation].append(column)
+    return result
+
+def execute_aggregation(
+    df: pd.DataFrame,
+    group_by: List[str],
+    aggregations: Dict[str, List[str]]
+) -> pd.DataFrame:
+    """Executa a agregação dos dados"""
+    # Prepara colunas de agrupamento
+    logger.info(f"Agrupando por: {', '.join(group_by)}")
+    
+    # Detecta e normaliza chaves sensíveis
+    for col in group_by:
+        key_type = detect_key_type(col)
+        if key_type:
+            logger.info(f"Normalizando coluna '{col}' como {key_type}")
+            df[col] = df[col].astype(str).str.replace(r'[^\d]', '', regex=True)
+            if key_type == 'cnpj':
+                df[col] = df[col].str.zfill(14)
+            elif key_type == 'cpf':
+                df[col] = df[col].str.zfill(11)
+    
+    # Prepara dicionário de agregações
+    agg_dict = {}
+    for operation, columns in aggregations.items():
+        for col in columns:
+            if operation == 'sum':
+                agg_dict[col] = 'sum'
+            elif operation == 'mean':
+                agg_dict[col] = 'mean'
+            elif operation == 'count':
+                agg_dict[col] = 'size'
+            elif operation == 'nunique':
+                agg_dict[col] = 'nunique'
+            else:
+                logger.warning(f"Operação de agregação não suportada: {operation}")
+    
+    # Executa agregação
+    result = df.groupby(group_by, as_index=False).agg(agg_dict)
+    
+    # Renomeia colunas size para count
+    result.columns = [col if col != 'size' else 'count' for col in result.columns]
+    
+    logger.info(f"Agregação concluída com {len(result)} registros")
+    return result
+
+def main():
+    args = parse_args()
+    
+    try:
+        # Carrega dados
+        logger.info(f"Carregando arquivo: {args.input}")
+        df = load_data(Path(args.input))
+        
+        # Valida inputs
+        validate_inputs(df, args.group_by)
+        
+        # Parseia agregations
+        agg_dict = parse_aggregations(args.aggregations)
+        
+        # Executa agregação
+        result = execute_aggregation(df, args.group_by, agg_dict)
+        
+        # Salva resultado
+        output_path = Path(args.output)
+        logger.info(f"Salvando resultado em: {output_path}")
+        
+        if output_path.suffix.lower() == '.csv':
+            result.to_csv(output_path, index=False, sep=';')
+        else:
+            result.to_excel(output_path, index=False)
+            
+        logger.info("Agregação concluída com sucesso!")
+        
+    except Exception as e:
+        logger.error(f"Erro na agregação: {str(e)}")
+        raise
+
+if __name__ == "__main__":
+    main()

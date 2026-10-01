@@ -69,5 +69,5 @@ def test_validate_rejects_unsupported_extension(tmp_path: Path):
     file_path = tmp_path / "input.txt"
     file_path.write_text("column\nvalue\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Extensão não suportada"):
+    with pytest.raises(ValueError, match="Formato de arquivo não suportado"):
         Validator.get_columns(file_path)
